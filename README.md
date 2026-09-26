@@ -29,7 +29,7 @@ I would like to request approval (private use) for a market script on world pt11
 
 Script name: Fill Warehouse
 Source code (not obfuscated): https://github.com/Mordokay/tw-fill-warehouse/blob/main/fillWarehouse.js
-Quickbar entry: javascript:$.getScript('https://cdn.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js');
+Quickbar entry: javascript:$.getScript('https://mordokay.github.io/tw-fill-warehouse/fillWarehouse.js');
 
 What it does:
 - It runs on the current village (an underdeveloped village).
@@ -39,7 +39,7 @@ What it does:
 
 What it does not do:
 - It does not send anything automatically or in bulk; every transport is a separate click.
-- It does not communicate with any external server; it only makes requests to the game itself (overview pages and the market send). jsDelivr is only used to load the file.
+- It does not communicate with any external server; it only makes requests to the game itself (overview pages and the market send). GitHub Pages is only used to load the file.
 - Settings are stored only in the browser's localStorage.
 
 It works similarly to scripts already approved on other markets, such as Shinko to Kuma's "Request resources" and "Resource sender".
@@ -63,7 +63,7 @@ In the game, go to **Configurações → Editar barra de acesso rápido → Adic
 | Nome da entrada | `Fill Warehouse` |
 | Dica | optional |
 | URL da imagem | empty |
-| URL de destino | `javascript:$.getScript('https://cdn.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js');` |
+| URL de destino | `javascript:$.getScript('https://mordokay.github.io/tw-fill-warehouse/fillWarehouse.js');` |
 | Abrir numa nova janela | unticked |
 
 **Atribuir** lets you give it a keyboard shortcut, which is handy when going village by village.
@@ -76,7 +76,20 @@ In the game, go to **Configurações → Editar barra de acesso rápido → Adic
    - **In village / Incoming / Goal / Still missing after plan**, one number per resource.
    - A list of proposed sends, closest source first. Press **Enter** repeatedly: each press sends one row, and focus moves to the next.
    - A **Skipped source** table explaining why a source couldn't help, showing the resources, warehouse and merchants the script read for it.
-4. Click **Next village →** (the game's own "next village" link) and repeat.
+4. Press **Enter** again (or click **Next village →**). The game switches to the next village (the game's own order and selected group) **without reloading the page**, and the panel stays open and recalculates for the new village. **← Previous village** goes back.
+
+### "Go to next village when..." (what Enter does)
+
+After each send, and when a village loads, the script decides where keyboard focus goes. If any ticked condition is true, focus goes to **Next village →**, so Enter moves on. Otherwise it goes to the next **Send** button.
+
+| Condition | Default |
+|---|---|
+| all proposed sends for this village are done | on |
+| this village is already at the goal | on |
+| this village is one of my source villages | on |
+| no source village can help | off |
+
+This mirrors LA Enhancer's "Go to next village when…" options. The conditions are only checked when you press a key or click, so it's always one click = one action. It never runs through villages by itself.
 
 Running it again on the same village is safe. Transports already on the way are counted as Incoming, so nothing is sent twice.
 
@@ -91,6 +104,7 @@ Settings are stored in `localStorage` under `fillWH_<world>_<playerId>`, so each
 | Resources per merchant | 1000 | Merchant carrying capacity |
 | Skip sends smaller than | 1000 | Don't propose a send whose total is below this. Also stops planning once the remaining need falls below it. |
 | Source villages | none | Ticked villages, stored as village IDs. The current village is never used as a source, even if ticked. |
+| Go to next village when… | see above | four checkboxes: `nextWhenDone`, `nextWhenAtGoal`, `nextWhenSource`, `nextWhenStuck` |
 
 ---
 
@@ -136,6 +150,19 @@ TribalWars.post('market', { ajaxaction: 'map_send', village: sourceId },
 
 This is the same endpoint the approved Shinko to Kuma scripts use. **One click = one send**, as the rules require. All Send buttons are disabled for 250 ms after each click to stay under the game's request rate limit. On success the row is greyed out, the numbers are added to the in-memory Incoming, and focus moves to the next button.
 
+### Switching village without a reload (`switchVillage(way)`)
+
+This is copied from **LA Enhancer** (`getNewVillage()` in <https://ntoombs19.github.io/LA-Enhancer/js/main.js>):
+
+1. `GET` the current page URL with `village=n<currentId>` (`p` for previous). The game resolves `n`/`p` to the next or previous village itself.
+2. Parse the new `game_data` from `TribalWars.updateGameData(...)` in the response and assign `window.game_data`.
+3. Replace `#header_info`, `#topContainer`, `#contentContainer` and `#quickbar_inner` with the new page's versions, update `document.title`, call `Timing.resetTickHandlers()`, and `history.pushState` the new URL.
+4. `target = targetFromGameData()`, then `start()` re-renders the panel.
+
+If the response isn't a normal game page (for example a captcha), it falls back to a normal page load, which closes the panel.
+
+Sends are protected against double-sending: a row is `pending` from the click until the game confirms. Each send also captures its plan, target and incoming entry, so a late confirmation after switching village can't touch the new village's panel.
+
 ### UI
 
 - `renderPanel()` prepends `#fillWH` to `#contentContainer`.
@@ -154,6 +181,9 @@ This is the same endpoint the approved Shinko to Kuma scripts use. **One click =
 | `renderPanel`, `skippedTable`, `summaryRow`, `focusNext` | main panel |
 | `sendRow` | one market send |
 | `showSettings`, `numberInput`, `clamp` | settings dialog |
+| `targetFromGameData` | current village from `game_data` |
+| `isSource`, `atGoal`, `shouldGoNext` | the "Go to next village when…" conditions |
+| `switchVillage` | next/previous village without a reload (see above) |
 | `start` | fetch both overviews in parallel, then render (opens Settings if there are no sources) |
 
 ---
@@ -161,16 +191,18 @@ This is the same endpoint the approved Shinko to Kuma scripts use. **One click =
 ## Hosting & deploying changes
 
 - Repo: <https://github.com/Mordokay/tw-fill-warehouse> (public, branch `main`), cloned at `~/Desktop/FillWarehouse`.
-- Served via jsDelivr: `https://cdn.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js`. `raw.githubusercontent.com` can't be used because it serves `text/plain` with `nosniff`, which the browser refuses to run.
+- Served via **GitHub Pages**: `https://mordokay.github.io/tw-fill-warehouse/fillWarehouse.js` (`application/javascript`, cached for 10 minutes). Pages was enabled on 2026-09-26.
+- Why not the others:
+  - `raw.githubusercontent.com` serves `text/plain` with `nosniff`, which the browser refuses to run.
+  - jsDelivr (`cdn.jsdelivr.net/gh/...@main`) was used first, but it caches which commit `@main` points to for up to about 12 hours, and purging did not reliably fix that (it served a reverted version for a long time). A commit-pinned jsDelivr URL (`@<commit sha>`) updates instantly, but then the quickbar has to change on every update.
 - After every change:
   ```sh
   node --check fillWarehouse.js
   git commit -am "..." && git push
-  curl -s "https://purge.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js"
-  # confirm the CDN serves the new code (the first purge sometimes needs a retry after ~10 s):
-  curl -s https://cdn.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js | grep "<something new>"
+  # wait 1-2 min for the Pages build, then confirm it serves the new code:
+  curl -s https://mordokay.github.io/tw-fill-warehouse/fillWarehouse.js | diff -q - fillWarehouse.js && echo up to date
   ```
-  Without a purge, jsDelivr can keep serving the old file for up to about 12 hours. The quickbar link never has to change.
+  Players get the new version within about 10 minutes (browser cache). The quickbar link never has to change.
 
 ## Verified in-game (2026-09-26, pt117, desktop)
 
@@ -189,7 +221,9 @@ This is the same endpoint the approved Shinko to Kuma scripts use. **One click =
    - Columns were too tight, so padding was added.
    - "Nothing to send" wrongly claimed the village was at the goal. The panel now gives the real reason and shows a Skipped source table.
    - Coordinates were shown twice, so the extra ones were removed.
-6. The script was hosted on GitHub + jsDelivr because the quickbar needs a URL.
+   - **Next village**, attempt 1 (reverted): made Next village change only the panel's *target* while the game stayed on the old village. The user rejected this as the wrong approach, because the game's village must actually change.
+   - **Next village**, attempt 2 (current): the user pointed to LA Enhancer. The game's village really changes, without a reload, so the panel stays. The "Go to next village when…" conditions were added too.
+6. The script is hosted on GitHub because the quickbar needs a URL. It was on jsDelivr first and moved to GitHub Pages after jsDelivr kept serving a stale `@main`.
 7. Approval: a support ticket was prepared (category *Perguntas*). The alternative route is submitting to the Script Library via zz1.
 
 ## Known limitations / ideas
@@ -197,5 +231,6 @@ This is the same endpoint the approved Shinko to Kuma scripts use. **One click =
 - **Desktop layout only.** The mobile overview HTML is different and isn't parsed.
 - The table column positions in the incoming-transports page (`cells[4]`, `cells[8]`) could break if InnoGames changes its layout. If Incoming ever shows 0 while transports are on their way, check this first.
 - Merchant capacity is a setting, not read from the game.
+- The no-reload village switch relies on the game page containing `TribalWars.updateGameData(` and the four container ids. If InnoGames changes that, Next village falls back to a full page load, which closes the panel.
 - The script doesn't estimate how long each transport will take to arrive; it only shows distance.
 - Possible future ideas: a stored list of target villages with a "next target" button; picking sources by group instead of checkboxes; preparing the Script Library submission (it needs an in-game config UI, which this already has).
