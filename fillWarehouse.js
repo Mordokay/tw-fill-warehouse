@@ -7,12 +7,28 @@
  *
  * Every market send is its own button click (one click = one action).
  * Settings are stored per world in localStorage.
+ *
+ * The panel stays at the top of the page and the game is shown in a frame below it,
+ * so changing village (Next/Previous, or any link in the game) keeps the panel.
  */
 (function () {
     'use strict';
 
     if (typeof game_data === 'undefined' || typeof TribalWars === 'undefined') {
         alert('Run this script from inside Tribal Wars.');
+        return;
+    }
+
+    // Already running: the game is shown in our frame, so a quickbar click inside it
+    // (or a second click in the top window) just refreshes the existing panel.
+    try {
+        if (window.top !== window && window.top.FillWH) {
+            window.top.FillWH.refresh();
+            return;
+        }
+    } catch (e) { /* different origin, ignore */ }
+    if (window.FillWH) {
+        window.FillWH.refresh();
         return;
     }
 
@@ -31,12 +47,13 @@
         nextWhenStuck: false    // no source village can help
     };
 
-    var target = targetFromGameData();
+    var target = targetFromGameData(game_data);
 
     var settings = loadSettings();
     var villages = [];
     var incoming = { wood: 0, stone: 0, iron: 0 };
     var plan = null;
+    var frame = null;   // iframe holding the game page; the panel lives above it
 
     // ---------- storage ----------
 
@@ -59,16 +76,16 @@
 
     // ---------- helpers ----------
 
-    function targetFromGameData() {
+    function targetFromGameData(gd) {
         return {
-            id: parseInt(game_data.village.id, 10),
-            name: game_data.village.name,
-            x: parseInt(game_data.village.x, 10),
-            y: parseInt(game_data.village.y, 10),
-            storage: parseInt(game_data.village.storage_max, 10),
-            wood: Math.floor(game_data.village.wood),
-            stone: Math.floor(game_data.village.stone),
-            iron: Math.floor(game_data.village.iron)
+            id: parseInt(gd.village.id, 10),
+            name: gd.village.name,
+            x: parseInt(gd.village.x, 10),
+            y: parseInt(gd.village.y, 10),
+            storage: parseInt(gd.village.storage_max, 10),
+            wood: Math.floor(gd.village.wood),
+            stone: Math.floor(gd.village.stone),
+            iron: Math.floor(gd.village.iron)
         };
     }
 
@@ -164,7 +181,8 @@
             need[r] = Math.max(0, goal - target[r] - incoming[r]);
         });
 
-        var sources = villages
+        // Source villages are never filled themselves.
+        var sources = isSource() ? [] : villages
             .filter(function (v) { return v.id !== target.id && settings.sources.indexOf(v.id) >= 0; })
             .sort(function (a, b) { return distance(a) - distance(b); });
 
@@ -210,7 +228,7 @@
             });
         });
 
-        var found = sources.map(function (v) { return v.id; });
+        var found = villages.map(function (v) { return v.id; });
         var missing = settings.sources.filter(function (id) {
             return id !== target.id && found.indexOf(id) < 0;
         });
@@ -255,10 +273,8 @@
             + '</table>';
 
         if (isSource()) {
-            html += '<p><b>This is one of your source villages.</b></p>';
-        }
-
-        if (!settings.sources.length) {
+            html += '<p><b>This is one of your source villages</b>, so nothing is sent to it.</p>';
+        } else if (!settings.sources.length) {
             html += '<p><b>No source villages configured.</b> Open Settings to pick them.</p>';
         } else if (!plan.rows.length) {
             if (atGoal()) {
@@ -294,15 +310,14 @@
             + '<input type="button" class="btn" id="fillWH_close" value="Close">'
             + '</div></div>';
 
-        var $container = $('#contentContainer').length ? $('#contentContainer') : $('#mobileContent, body').first();
-        $container.prepend(html);
+        $('#fillWH_area').prepend(html);
 
         $('#fillWH .fillWH-send').on('click', function () { sendRow(parseInt($(this).data('row'), 10)); });
         $('#fillWH_prev').on('click', function () { switchVillage('p'); });
         $('#fillWH_next').on('click', function () { switchVillage('n'); });
         $('#fillWH_settings').on('click', showSettings);
         $('#fillWH_refresh').on('click', start);
-        $('#fillWH_close').on('click', function () { $('#fillWH').remove(); });
+        $('#fillWH_close').on('click', closeHost);
         focusNext();
     }
 
@@ -328,47 +343,69 @@
             || (settings.nextWhenStuck && !rows.length && !atGoal());
     }
 
-    // Moves the game to the next/previous village without a page reload, so the panel stays.
-    // Same technique as LA Enhancer: load "village=n<id>" (the game's own next village,
-    // following the selected group), then swap in the new page's content and game data.
+    // ---------- frame host ----------
+    // The game is shown in an iframe below the panel. Changing village is a normal page load
+    // inside the frame (so all game scripts, menus and the quickbar keep working), while the
+    // panel in the top window stays.
+
+    function createHost() {
+        var startUrl = location.href;
+        $('body').children().hide();
+        $('body').css({ margin: 0, overflow: 'hidden' });
+        var $host = $('<div id="fillWH_host" style="position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;"></div>');
+        var $area = $('<div id="fillWH_area" style="flex:0 0 auto;max-height:45vh;overflow:auto;"></div>');
+        frame = $('<iframe id="fillWH_frame" style="flex:1 1 auto;width:100%;border:0;"></iframe>')[0];
+        $host.append($area, frame);
+        $('body').append($host);
+        frame.addEventListener('load', onFrameLoad);
+        frame.src = startUrl;
+    }
+
+    // URL of the page in the frame, with "village=n123"/"p123" replaced by the real village id.
+    function frameUrl() {
+        var gw = frame.contentWindow;
+        return gw.location.href.replace(/([?&]village=)[np]?\d+/, '$1' + gw.game_data.village.id);
+    }
+
+    function onFrameLoad() {
+        var gd;
+        try {
+            gd = frame.contentWindow.game_data;
+        } catch (e) { /* not a game page */ }
+        if (!gd || !gd.village) {
+            $('#fillWH').remove();
+            $('#fillWH_area').html('<div id="fillWH" class="vis" style="padding:6px;">Fill Warehouse: this page has no village. '
+                + '<input type="button" class="btn" id="fillWH_close" value="Close"></div>');
+            $('#fillWH_close').on('click', closeHost);
+            return;
+        }
+        // Keep the address bar in sync, so refreshing opens the village you are on.
+        try {
+            history.replaceState(null, '', frameUrl());
+            document.title = frame.contentWindow.document.title;
+        } catch (e) { /* ignore */ }
+        target = targetFromGameData(gd);
+        plan = null;
+        start();
+    }
+
+    // Next/previous village the game's own way ("village=n<id>" / "p<id>"), inside the frame.
     function switchVillage(way) {
+        var gw = frame.contentWindow;
+        var id = gw.game_data.village.id;
         UI.InfoMessage(way === 'n' ? 'Switching to next village...' : 'Switching to previous village...', 500);
         $('#fillWH input.btn').prop('disabled', true);
+        var href = gw.location.href;
+        gw.location.href = /[?&]village=[np]?\d+/.test(href)
+            ? href.replace(/([?&]village=)[np]?\d+/, '$1' + way + id)
+            : gw.game_data.link_base_pure.replace(/village=\d+/, 'village=' + way + id) + gw.game_data.screen;
+    }
 
-        var pageUrl = /[?&]village=\d+/.test(location.href)
-            ? location.href.replace(/([?&]village=)\d+/, '$1' + way + game_data.village.id)
-            : game_data.link_base_pure.replace(/village=\d+/, 'village=' + way + game_data.village.id) + game_data.screen;
-
-        $.get(pageUrl).done(function (html) {
-            var newGameData;
-            try {
-                newGameData = JSON.parse(html.split('TribalWars.updateGameData(')[1].split(');')[0]);
-            } catch (e) {
-                // Unexpected page (e.g. a captcha): fall back to a normal page load.
-                location.href = pageUrl;
-                return;
-            }
-            window.game_data = newGameData;
-
-            var $page = $(html);
-            ['#header_info', '#topContainer', '#contentContainer', '#quickbar_inner'].forEach(function (sel) {
-                var $fresh = $(sel, $page);
-                if ($fresh.length) $(sel).html($fresh.html());
-            });
-            var title = html.match(/<title>([^<]*)<\/title>/);
-            if (title) document.title = $('<div>').html(title[1]).text();
-            if (window.Timing && typeof Timing.resetTickHandlers === 'function') Timing.resetTickHandlers();
-            if (history.pushState) {
-                history.pushState({}, document.title, location.href.replace(/([?&]village=)\d+/, '$1' + game_data.village.id));
-            }
-
-            target = targetFromGameData();
-            plan = null;
-            start();
-        }).fail(function () {
-            $('#fillWH input.btn').prop('disabled', false);
-            UI.ErrorMessage('Fill Warehouse: could not switch village.');
-        });
+    // Back to the normal game page (the village currently shown), without the panel.
+    function closeHost() {
+        var next = location.href;
+        try { next = frameUrl(); } catch (e) { /* keep current URL */ }
+        location.href = next;
     }
 
     // Sources that were considered but couldn't send, with what the script read for them.
@@ -549,5 +586,6 @@
         });
     }
 
-    start();
+    window.FillWH = { refresh: function () { start(); } };
+    createHost();   // the frame's load event calls start()
 })();

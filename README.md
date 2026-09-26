@@ -150,18 +150,27 @@ TribalWars.post('market', { ajaxaction: 'map_send', village: sourceId },
 
 This is the same endpoint the approved Shinko to Kuma scripts use. **One click = one send**, as the rules require. All Send buttons are disabled for 250 ms after each click to stay under the game's request rate limit. On success the row is greyed out, the numbers are added to the in-memory Incoming, and focus moves to the next button.
 
-### Switching village without a reload (`switchVillage(way)`)
+### Keeping the panel while the village changes (frame host)
 
-This is copied from **LA Enhancer** (`getNewVillage()` in <https://ntoombs19.github.io/LA-Enhancer/js/main.js>):
+When the script starts (`createHost()`), it hides the page's content and shows two things:
+- **at the top**: the panel (`#fillWH_area`, at most 45% of the screen, scrolls if longer)
+- **below it**: an iframe (`#fillWH_frame`) loading the same game page
 
-1. `GET` the current page URL with `village=n<currentId>` (`p` for previous). The game resolves `n`/`p` to the next or previous village itself.
-2. Parse the new `game_data` from `TribalWars.updateGameData(...)` in the response and assign `window.game_data`.
-3. Replace `#header_info`, `#topContainer`, `#contentContainer` and `#quickbar_inner` with the new page's versions, update `document.title`, call `Timing.resetTickHandlers()`, and `history.pushState` the new URL.
-4. `target = targetFromGameData()`, then `start()` re-renders the panel.
+Changing village is a **normal page load inside the frame**, so the game's scripts, menus and quickbar all work, and the panel in the top window stays.
 
-If the response isn't a normal game page (for example a captcha), it falls back to a normal page load, which closes the panel.
+- **Next/Previous** (`switchVillage(way)`): load the frame's current page with `village=n<id>` or `p<id>`. The game itself resolves that to the next or previous village, following the selected group. The trick of using `n`/`p` comes from LA Enhancer's `getNewVillage()`.
+- **On every frame load** (`onFrameLoad()`): read `game_data` from the frame, then `history.replaceState` the top URL to the frame's URL (with `n123` replaced by the real id), so refreshing opens the current village. Then refresh the panel for that village. The panel also follows any other navigation inside the frame.
+- **Quickbar clicked inside the frame**: the script sees `window.top.FillWH` and only refreshes the existing panel, so you never get a second panel.
+- **Close** (`closeHost()`): loads the frame's current page as a normal page, without the panel.
+- Sends, the overview requests, `UI` messages and the Settings `Dialog` all run in the top window. The session is the same, so the CSRF token and cookies are the same.
+
+**Attempts that failed:**
+1. Only changing the panel's target: the game stayed on the old village. The user rejected it.
+2. LA Enhancer's full technique: AJAX-loading the next page and swapping `#header_info`, `#topContainer`, `#contentContainer` and `#quickbar_inner`. The game's inline scripts in the swapped content threw errors partway through. The village changed, but the quickbar and menus stopped working, the URL didn't update and the panel disappeared. LA Enhancer only gets away with it because it only swaps the Loot Assistant screen.
 
 Sends are protected against double-sending: a row is `pending` from the click until the game confirms. Each send also captures its plan, target and incoming entry, so a late confirmation after switching village can't touch the new village's panel.
+
+Source villages are never filled: on a source village, no sends are planned.
 
 ### UI
 
@@ -183,7 +192,7 @@ Sends are protected against double-sending: a row is `pending` from the click un
 | `showSettings`, `numberInput`, `clamp` | settings dialog |
 | `targetFromGameData` | current village from `game_data` |
 | `isSource`, `atGoal`, `shouldGoNext` | the "Go to next village when…" conditions |
-| `switchVillage` | next/previous village without a reload (see above) |
+| `createHost`, `onFrameLoad`, `frameUrl`, `switchVillage`, `closeHost` | frame host (see above) |
 | `start` | fetch both overviews in parallel, then render (opens Settings if there are no sources) |
 
 ---
@@ -222,7 +231,8 @@ Sends are protected against double-sending: a row is `pending` from the click un
    - "Nothing to send" wrongly claimed the village was at the goal. The panel now gives the real reason and shows a Skipped source table.
    - Coordinates were shown twice, so the extra ones were removed.
    - **Next village**, attempt 1 (reverted): made Next village change only the panel's *target* while the game stayed on the old village. The user rejected this as the wrong approach, because the game's village must actually change.
-   - **Next village**, attempt 2 (current): the user pointed to LA Enhancer. The game's village really changes, without a reload, so the panel stays. The "Go to next village when…" conditions were added too.
+   - **Next village**, attempt 2: the user pointed to LA Enhancer, and its page-swap technique was copied, along with its "Go to next village when…" conditions. In-game it broke the quickbar and menus, the URL didn't update and the panel vanished.
+   - **Next village**, attempt 3 (current): the frame host. The game runs in an iframe under the panel, so village changes are real page loads. It was tested end-to-end against a local mock server before release.
 6. The script is hosted on GitHub because the quickbar needs a URL. It was on jsDelivr first and moved to GitHub Pages after jsDelivr kept serving a stale `@main`.
 7. Approval: a support ticket was prepared (category *Perguntas*). The alternative route is submitting to the Script Library via zz1.
 
@@ -231,6 +241,7 @@ Sends are protected against double-sending: a row is `pending` from the click un
 - **Desktop layout only.** The mobile overview HTML is different and isn't parsed.
 - The table column positions in the incoming-transports page (`cells[4]`, `cells[8]`) could break if InnoGames changes its layout. If Incoming ever shows 0 while transports are on their way, check this first.
 - Merchant capacity is a setting, not read from the game.
-- The no-reload village switch relies on the game page containing `TribalWars.updateGameData(` and the four container ids. If InnoGames changes that, Next village falls back to a full page load, which closes the panel.
+- The frame host needs the game to allow being shown in a frame. It currently sends `X-Frame-Options: NONE`, which doesn't block framing. If InnoGames starts blocking it, the frame will show an error page.
+- **Testing rule:** never automate a browser against the real game or with a logged-in profile (the user was banned once). Mock tests only: a local server on 127.0.0.1 plus a throwaway headless-Chrome profile. The mock and test script used for attempt 3 were temporary and weren't kept.
 - The script doesn't estimate how long each transport will take to arrive; it only shows distance.
 - Possible future ideas: a stored list of target villages with a "next target" button; picking sources by group instead of checkboxes; preparing the Script Library submission (it needs an in-game config UI, which this already has).
