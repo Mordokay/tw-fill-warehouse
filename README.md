@@ -156,10 +156,13 @@ When the script starts (`createHost()`), it hides the page's content and shows t
 
 Changing village is a **normal page load inside the frame**, so the game's scripts, menus and quickbar all work, and the panel in the top window stays.
 
+- **Only the panel's own Previous/Next keep the panel.** `ownNavigation` is set just before the script loads a page in the frame. Any other page load (game links, the game's village arrows, a village in the overview, menus) closes the panel (`closeHost()`), leaving you on that page as a normal page. The user asked for this, because a panel that survives everything felt too aggressive.
+- **Safe addresses** (`cleanUrl()`): the address-bar sync, Next/Previous and the fallback in `closeHost()` only use `village`, `screen` and `mode`, never `action=` or `h=` (security token), so a refresh or reload can't repeat a game action. When the panel closes because you went elsewhere, the full address is kept (for example `info_village&id=…`), unless it contains `action=` or `h=`.
 - **Next/Previous** (`switchVillage(way)`): load the frame's current page with `village=n<id>` or `p<id>`. The game itself resolves that to the next or previous village, following the selected group. The trick of using `n`/`p` comes from LA Enhancer's `getNewVillage()`.
-- **On every frame load** (`onFrameLoad()`): the panel is re-rendered into the new page. The script reads `game_data` from the frame, then `history.replaceState` the top URL to the frame's URL (with `n123` replaced by the real id), so refreshing opens the current village. Then refresh the panel for that village. The panel also follows any other navigation inside the frame.
+- **On every frame load** (`onFrameLoad()`): the panel is re-rendered into the new page. The script reads `game_data` from the frame, then `history.replaceState` the top URL to `cleanUrl()`, so refreshing opens the current village. Then refresh the panel for that village.
 - **Quickbar clicked inside the frame**: the script sees `window.top.FillWH` and only refreshes the existing panel, so you never get a second panel.
 - **Close** (`closeHost()`): loads the frame's current page as a normal page, without the panel.
+- Leaving through a game link loads that page twice: once in the frame, then once as the normal page.
 - Sends, the overview requests, `UI` messages and the Settings `Dialog` all run in the top window. The session is the same, so the CSRF token and cookies are the same.
 
 **Attempts that failed:**
@@ -231,7 +234,7 @@ Source villages are never filled: on a source village, no sends are planned.
    - Coordinates were shown twice, so the extra ones were removed.
    - **Next village**, attempt 1 (reverted): made Next village change only the panel's *target* while the game stayed on the old village. The user rejected this as the wrong approach, because the game's village must actually change.
    - **Next village**, attempt 2: the user pointed to LA Enhancer, and its page-swap technique was copied, along with its "Go to next village when…" conditions. In-game it broke the quickbar and menus, the URL didn't update and the panel vanished.
-   - **Next village**, attempt 3 (current): the frame host. The first version put the panel above the whole game, which the user didn't want. It now goes inside the game page, under the menu bar. The game runs in an iframe under the panel, so village changes are real page loads. It was tested end-to-end against a local mock server before release.
+   - **Next village**, attempt 3 (current): the frame host. The first version put the panel above the whole game, which the user didn't want. It now goes inside the game page, under the menu bar. After that, the panel stayed through *every* navigation, which the user found too aggressive. Now only the panel's own Previous/Next keep it. The game runs in an iframe under the panel, so village changes are real page loads. It was tested end-to-end against a local mock server before release.
 6. The script is hosted on GitHub because the quickbar needs a URL. It was on jsDelivr first and moved to GitHub Pages after jsDelivr kept serving a stale `@main`.
 7. Approval: a support ticket was prepared (category *Perguntas*). The alternative route is submitting to the Script Library via zz1.
 

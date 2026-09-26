@@ -360,9 +360,12 @@
     }
 
     // ---------- frame host ----------
-    // The game is shown in an iframe below the panel. Changing village is a normal page load
-    // inside the frame (so all game scripts, menus and the quickbar keep working), while the
-    // panel in the top window stays.
+    // The game is shown in a full-screen iframe and the panel is drawn inside the game page.
+    // Only the panel's own Previous/Next buttons keep the panel: they load the next village in
+    // the frame. Any other navigation (game links, village arrows, overview...) closes the panel
+    // and simply leaves you on that page.
+
+    var ownNavigation = false;   // true while a page load in the frame was started by us
 
     function createHost() {
         var startUrl = location.href;
@@ -373,30 +376,41 @@
         $host.append(frame);
         $('body').append($host);
         frame.addEventListener('load', onFrameLoad);
+        ownNavigation = true;
         frame.src = startUrl;
     }
 
-    // URL of the page in the frame, with "village=n123"/"p123" replaced by the real village id.
-    function frameUrl() {
+    // Safe address of the page in the frame: only village, screen and mode. Never action
+    // parameters or security tokens, so reloading it can't repeat a game action.
+    function cleanUrl(village) {
         var gw = frame.contentWindow;
-        return gw.location.href.replace(/([?&]village=)[np]?\d+/, '$1' + gw.game_data.village.id);
+        var gd = gw.game_data;
+        var params = new URLSearchParams(gw.location.search);
+        var result = gd.link_base_pure.replace(/village=[np]?\d+/, 'village=' + (village || gd.village.id))
+            + encodeURIComponent(params.get('screen') || gd.screen);
+        if (params.get('mode')) result += '&mode=' + encodeURIComponent(params.get('mode'));
+        return result;
     }
 
     function onFrameLoad() {
+        if (!ownNavigation) {
+            // The user went somewhere else in the game: stop, and show that page normally.
+            closeHost();
+            return;
+        }
+        ownNavigation = false;
+
         var gd;
         try {
             gd = frame.contentWindow.game_data;
         } catch (e) { /* not a game page */ }
         if (!gd || !gd.village) {
-            $p('#fillWH').remove();
-            $p('body').prepend('<div id="fillWH" class="vis" style="padding:6px;">Fill Warehouse: this page has no village. '
-                + '<input type="button" class="btn" id="fillWH_close" value="Close"></div>');
-            $p('#fillWH_close').on('click', closeHost);
+            closeHost();
             return;
         }
         // Keep the address bar in sync, so refreshing opens the village you are on.
         try {
-            history.replaceState(null, '', frameUrl());
+            history.replaceState(null, '', cleanUrl());
             document.title = frame.contentWindow.document.title;
         } catch (e) { /* ignore */ }
         target = targetFromGameData(gd);
@@ -406,20 +420,22 @@
 
     // Next/previous village the game's own way ("village=n<id>" / "p<id>"), inside the frame.
     function switchVillage(way) {
-        var gw = frame.contentWindow;
-        var id = gw.game_data.village.id;
         UI.InfoMessage(way === 'n' ? 'Switching to next village...' : 'Switching to previous village...', 500);
         $p('#fillWH input.btn').prop('disabled', true);
-        var href = gw.location.href;
-        gw.location.href = /[?&]village=[np]?\d+/.test(href)
-            ? href.replace(/([?&]village=)[np]?\d+/, '$1' + way + id)
-            : gw.game_data.link_base_pure.replace(/village=\d+/, 'village=' + way + id) + gw.game_data.screen;
+        ownNavigation = true;
+        frame.contentWindow.location.href = cleanUrl(way + frame.contentWindow.game_data.village.id);
     }
 
-    // Back to the normal game page (the village currently shown), without the panel.
+    // Back to the normal game page (the page currently shown in the frame), without the panel.
+    // Its full address is kept (e.g. a report or village info page), unless it carries an action
+    // or security token - then only the safe village/screen/mode address is used.
     function closeHost() {
         var next = location.href;
-        try { next = frameUrl(); } catch (e) { /* keep current URL */ }
+        try {
+            next = frame.contentWindow.location.href;
+            if (/[?&](action|h)=/.test(next)) next = cleanUrl();
+        } catch (e) { /* keep the current address */ }
+        window.FillWH = null;
         location.href = next;
     }
 
