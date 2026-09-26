@@ -193,14 +193,24 @@
 
     // ---------- UI ----------
 
+    function injectStyles() {
+        if ($('#fillWH_styles').length) return;
+        $('head').append('<style id="fillWH_styles">'
+            + '.fillWH-table th, .fillWH-table td { padding: 3px 14px; }'
+            + '.fillWH-table td:not(:first-child) { text-align: right; }'
+            + '.fillWH-table th { text-align: center; }'
+            + '</style>');
+    }
+
     function renderPanel() {
+        injectStyles();
         $('#fillWH').remove();
         plan = buildPlan();
 
         var html = '<div id="fillWH" class="vis" style="margin:5px 0;padding:6px;">'
             + '<h3 style="margin:0 0 6px;">Fill Warehouse &rarr; ' + esc(target.name)
             + ' (' + target.x + '|' + target.y + ')</h3>'
-            + '<table class="vis" style="margin-bottom:6px;"><tr><th></th>'
+            + '<table class="vis fillWH-table" style="margin-bottom:6px;"><tr><th></th>'
             + RES.map(function (r) { return '<th>' + resIcon(r) + '</th>'; }).join('')
             + '</tr>'
             + summaryRow('In village', target)
@@ -215,7 +225,7 @@
         } else if (!plan.rows.length) {
             html += '<p><b>Nothing to send.</b> This village is already at the goal, or no source has spare resources/merchants.</p>';
         } else {
-            html += '<table class="vis" width="100%"><tr><th>Source</th><th>Distance</th>'
+            html += '<table class="vis fillWH-table" width="100%"><tr><th>Source</th><th>Distance</th>'
                 + RES.map(function (r) { return '<th>' + resIcon(r) + '</th>'; }).join('')
                 + '<th>Merchants</th><th></th></tr>';
             plan.rows.forEach(function (row, i) {
@@ -300,7 +310,7 @@
         var sorted = villages.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
         var html = '<div style="max-width:650px;">'
             + '<h3>Fill Warehouse settings</h3>'
-            + '<table class="vis">'
+            + '<table class="vis fillWH-table">'
             + numberInput('fillWH_fill', 'Fill target warehouse to (%)', settings.fillPercent)
             + numberInput('fillWH_keep', 'Keep at least this % in source villages', settings.keepPercent)
             + numberInput('fillWH_carry', 'Resources per merchant', settings.carry)
@@ -310,7 +320,7 @@
             + '<input type="text" id="fillWH_filter" placeholder="Filter by name or coords" style="width:200px;"> '
             + '<input type="button" class="btn" id="fillWH_all" value="Select shown"> '
             + '<input type="button" class="btn" id="fillWH_none" value="Clear shown">'
-            + '<div style="max-height:350px;overflow:auto;margin-top:6px;"><table class="vis" width="100%">'
+            + '<div style="max-height:350px;overflow:auto;margin-top:6px;"><table class="vis fillWH-table" width="100%">'
             + '<tr><th></th><th>Village</th><th>Warehouse</th>'
             + RES.map(function (r) { return '<th>' + resIcon(r) + '</th>'; }).join('')
             + '</tr>';
@@ -318,7 +328,7 @@
             var checked = settings.sources.indexOf(v.id) >= 0 ? ' checked' : '';
             html += '<tr class="fillWH-vrow" data-search="' + esc((v.name + ' ' + v.x + '|' + v.y).toLowerCase()) + '">'
                 + '<td><input type="checkbox" class="fillWH-src" value="' + v.id + '"' + checked + '></td>'
-                + '<td>' + esc(v.name) + ' (' + v.x + '|' + v.y + ')</td>'
+                + '<td style="text-align:left;">' + esc(v.name) + ' (' + v.x + '|' + v.y + ')</td>'
                 + '<td>' + fmt(v.storage) + '</td>'
                 + RES.map(function (r) { return '<td>' + fmt(v[r]) + '</td>'; }).join('')
                 + '</tr>';
