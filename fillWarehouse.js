@@ -7,28 +7,12 @@
  *
  * Every market send is its own button click (one click = one action).
  * Settings are stored per world in localStorage.
- *
- * The panel stays at the top of the page and the game is shown in a frame below it,
- * so changing village (Next/Previous, or any link in the game) keeps the panel.
  */
 (function () {
     'use strict';
 
     if (typeof game_data === 'undefined' || typeof TribalWars === 'undefined') {
         alert('Run this script from inside Tribal Wars.');
-        return;
-    }
-
-    // Already running: the game is shown in our frame, so a quickbar click inside it
-    // (or a second click in the top window) just refreshes the existing panel.
-    try {
-        if (window.top !== window && window.top.FillWH) {
-            window.top.FillWH.refresh();
-            return;
-        }
-    } catch (e) { /* different origin, ignore */ }
-    if (window.FillWH) {
-        window.FillWH.refresh();
         return;
     }
 
@@ -39,21 +23,25 @@
         fillPercent: 85,    // fill the target warehouse up to this % per resource
         keepPercent: 20,    // never drain a source below this % of its own warehouse
         carry: 1000,        // resources per merchant
-        minSend: 1000,      // skip sends smaller than this (total resources)
-        // "Go to next village when..." - when one of these is true, Enter moves on instead of sending
-        nextWhenDone: true,     // all proposed sends for this village have been made
-        nextWhenAtGoal: true,   // this village is already at the goal
-        nextWhenSource: true,   // this village is one of the source villages
-        nextWhenStuck: false    // no source village can help
+        minSend: 1000       // skip sends smaller than this (total resources)
     };
 
-    var target = targetFromGameData(game_data);
+    var target = {
+        id: parseInt(game_data.village.id, 10),
+        name: game_data.village.name,
+        x: parseInt(game_data.village.x, 10),
+        y: parseInt(game_data.village.y, 10),
+        storage: parseInt(game_data.village.storage_max, 10),
+        wood: Math.floor(game_data.village.wood),
+        stone: Math.floor(game_data.village.stone),
+        iron: Math.floor(game_data.village.iron)
+    };
 
     var settings = loadSettings();
     var villages = [];
-    var incoming = { wood: 0, stone: 0, iron: 0 };
+    var incomingByVillage = {};                    // village id -> resources on the way
+    var incoming = { wood: 0, stone: 0, iron: 0 }; // entry for the current target
     var plan = null;
-    var frame = null;   // iframe holding the game page; the panel lives above it
 
     // ---------- storage ----------
 
@@ -75,32 +63,6 @@
     }
 
     // ---------- helpers ----------
-
-    function targetFromGameData(gd) {
-        return {
-            id: parseInt(gd.village.id, 10),
-            name: gd.village.name,
-            x: parseInt(gd.village.x, 10),
-            y: parseInt(gd.village.y, 10),
-            storage: parseInt(gd.village.storage_max, 10),
-            wood: Math.floor(gd.village.wood),
-            stone: Math.floor(gd.village.stone),
-            iron: Math.floor(gd.village.iron)
-        };
-    }
-
-    // The panel lives inside the game page shown in the frame (just under the menu bar).
-    function panelDoc() {
-        try {
-            return frame && frame.contentDocument && frame.contentDocument.body ? frame.contentDocument : document;
-        } catch (e) {
-            return document;
-        }
-    }
-
-    function $p(selector) {
-        return $(selector, panelDoc());
-    }
 
     function url(query) {
         return game_data.link_base_pure + query;
@@ -163,16 +125,17 @@
         });
     }
 
-    // Resources already travelling to the current village (from anyone).
+    // Resources already travelling to each of your villages (from anyone), keyed by village id.
     function fetchIncoming() {
         return $.get(url('overview_villages&mode=trader&type=inc&group=0&page=-1')).then(function (html) {
-            var total = { wood: 0, stone: 0, iron: 0 };
+            var byVillage = {};
             $(html).find('#trades_table tr').each(function () {
                 var cells = this.children;
                 if (cells.length < 9 || cells[0].tagName === 'TH') return;
                 var href = $(cells[4]).find('a').attr('href') || '';
                 var m = href.match(/[?&]id=(\d+)/) || href.match(/village=(\d+)/);
-                if (!m || parseInt(m[1], 10) !== target.id) return;
+                if (!m) return;
+                var total = incomingFor(byVillage, parseInt(m[1], 10));
                 $(cells[8]).children().each(function () {
                     var classes = this.className + ' ' + $(this).find('[class]').map(function () {
                         return this.className;
@@ -181,8 +144,22 @@
                     if (type) total[type[1]] += parseNumber($(this).text());
                 });
             });
-            return total;
+            return byVillage;
         });
+    }
+
+    function incomingFor(byVillage, id) {
+        if (!byVillage[id]) byVillage[id] = { wood: 0, stone: 0, iron: 0 };
+        return byVillage[id];
+    }
+
+    // Total still needed to reach the goal, counting what's already on the way.
+    function missingTotal(v) {
+        var goal = Math.floor(v.storage * settings.fillPercent / 100);
+        var inc = incomingFor(incomingByVillage, v.id);
+        return RES.reduce(function (total, r) {
+            return total + Math.max(0, goal - v[r] - inc[r]);
+        }, 0);
     }
 
     // ---------- planning ----------
@@ -194,8 +171,7 @@
             need[r] = Math.max(0, goal - target[r] - incoming[r]);
         });
 
-        // Source villages are never filled themselves.
-        var sources = isSource() ? [] : villages
+        var sources = villages
             .filter(function (v) { return v.id !== target.id && settings.sources.indexOf(v.id) >= 0; })
             .sort(function (a, b) { return distance(a) - distance(b); });
 
@@ -237,11 +213,12 @@
                 send: send,
                 merchants: Math.ceil(total / settings.carry),
                 distance: distance(src),
+                targetId: target.id,
                 sent: false
             });
         });
 
-        var found = villages.map(function (v) { return v.id; });
+        var found = sources.map(function (v) { return v.id; });
         var missing = settings.sources.filter(function (id) {
             return id !== target.id && found.indexOf(id) < 0;
         });
@@ -259,24 +236,21 @@
     // ---------- UI ----------
 
     function injectStyles() {
-        [document, panelDoc()].forEach(function (doc) {
-            if ($('#fillWH_styles', doc).length) return;
-            $('head', doc).append('<style id="fillWH_styles">'
-                + '.fillWH-table th, .fillWH-table td { padding: 3px 14px; }'
-                + '.fillWH-table td:not(:first-child) { text-align: right; }'
-                + '.fillWH-table th { text-align: center; }'
-                + '</style>');
-        });
+        if ($('#fillWH_styles').length) return;
+        $('head').append('<style id="fillWH_styles">'
+            + '.fillWH-table th, .fillWH-table td { padding: 3px 14px; }'
+            + '.fillWH-table td:not(:first-child) { text-align: right; }'
+            + '.fillWH-table th { text-align: center; }'
+            + '</style>');
     }
 
     function renderPanel() {
         injectStyles();
-        $p('#fillWH').remove();
+        $('#fillWH').remove();
         plan = buildPlan();
 
         var html = '<div id="fillWH" class="vis" style="margin:5px 0;padding:6px;">'
-            + '<h3 style="margin:0 0 6px;">Fill Warehouse &rarr; ' + esc(target.name)
-            + ' (' + target.x + '|' + target.y + ')</h3>'
+            + '<h3 style="margin:0 0 6px;">Fill Warehouse &rarr; ' + esc(target.name) + '</h3>'
             + '<table class="vis fillWH-table" style="margin-bottom:6px;"><tr><th></th>'
             + RES.map(function (r) { return '<th>' + resIcon(r) + '</th>'; }).join('')
             + '</tr>'
@@ -287,12 +261,10 @@
             + summaryRow('Still missing after plan', plan.remaining)
             + '</table>';
 
-        if (isSource()) {
-            html += '<p><b>This is one of your source villages</b>, so nothing is sent to it.</p>';
-        } else if (!settings.sources.length) {
+        if (!settings.sources.length) {
             html += '<p><b>No source villages configured.</b> Open Settings to pick them.</p>';
         } else if (!plan.rows.length) {
-            if (atGoal()) {
+            if (missingTotal(target) < settings.minSend) {
                 html += '<p><b>Nothing to send.</b> This village is already at the goal.</p>';
             } else if (!plan.sourceCount) {
                 html += '<p><b>Nothing to send.</b> None of your source villages were found (only this village is selected, or the overview could not be read).</p>';
@@ -318,125 +290,19 @@
         html += skippedTable();
 
         html += '<div style="margin-top:6px;">'
-            + '<input type="button" class="btn" id="fillWH_prev" value="&larr; Previous village"> '
-            + '<input type="button" class="btn" id="fillWH_next" value="Next village &rarr;"> '
             + '<input type="button" class="btn" id="fillWH_settings" value="Settings"> '
             + '<input type="button" class="btn" id="fillWH_refresh" value="Recalculate"> '
             + '<input type="button" class="btn" id="fillWH_close" value="Close">'
             + '</div></div>';
 
-        var $container = $p('#contentContainer');
-        ($container.length ? $container : $p('body')).first().prepend(html);
+        var $container = $('#contentContainer').length ? $('#contentContainer') : $('#mobileContent, body').first();
+        $container.prepend(html);
 
-        $p('#fillWH .fillWH-send').on('click', function () { sendRow(parseInt($(this).data('row'), 10)); });
-        $p('#fillWH_prev').on('click', function () { switchVillage('p'); });
-        $p('#fillWH_next').on('click', function () { switchVillage('n'); });
-        $p('#fillWH_settings').on('click', showSettings);
-        $p('#fillWH_refresh').on('click', start);
-        $p('#fillWH_close').on('click', closeHost);
+        $('#fillWH .fillWH-send').on('click', function () { sendRow(parseInt($(this).data('row'), 10)); });
+        $('#fillWH_settings').on('click', showSettings);
+        $('#fillWH_refresh').on('click', function () { start(); });
+        $('#fillWH_close').on('click', function () { $('#fillWH').remove(); });
         focusNext();
-    }
-
-    function isSource() {
-        return settings.sources.indexOf(target.id) >= 0;
-    }
-
-    function atGoal() {
-        var goal = Math.floor(target.storage * settings.fillPercent / 100);
-        var missing = RES.reduce(function (total, r) {
-            return total + Math.max(0, goal - target[r] - incoming[r]);
-        }, 0);
-        return missing < settings.minSend;
-    }
-
-    // The "Go to next village when..." conditions.
-    function shouldGoNext() {
-        var rows = plan ? plan.rows : [];
-        var allSent = rows.length > 0 && rows.every(function (x) { return x.sent; });
-        return (settings.nextWhenSource && isSource())
-            || (settings.nextWhenDone && allSent)
-            || (settings.nextWhenAtGoal && !rows.length && atGoal())
-            || (settings.nextWhenStuck && !rows.length && !atGoal());
-    }
-
-    // ---------- frame host ----------
-    // The game is shown in a full-screen iframe and the panel is drawn inside the game page.
-    // Only the panel's own Previous/Next buttons keep the panel: they load the next village in
-    // the frame. Any other navigation (game links, village arrows, overview...) closes the panel
-    // and simply leaves you on that page.
-
-    var ownNavigation = false;   // true while a page load in the frame was started by us
-
-    function createHost() {
-        var startUrl = location.href;
-        $('body').children().hide();
-        $('body').css({ margin: 0, overflow: 'hidden' });
-        var $host = $('<div id="fillWH_host" style="position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;"></div>');
-        frame = $('<iframe id="fillWH_frame" style="flex:1 1 auto;width:100%;border:0;"></iframe>')[0];
-        $host.append(frame);
-        $('body').append($host);
-        frame.addEventListener('load', onFrameLoad);
-        ownNavigation = true;
-        frame.src = startUrl;
-    }
-
-    // Safe address of the page in the frame: only village, screen and mode. Never action
-    // parameters or security tokens, so reloading it can't repeat a game action.
-    function cleanUrl(village) {
-        var gw = frame.contentWindow;
-        var gd = gw.game_data;
-        var params = new URLSearchParams(gw.location.search);
-        var result = gd.link_base_pure.replace(/village=[np]?\d+/, 'village=' + (village || gd.village.id))
-            + encodeURIComponent(params.get('screen') || gd.screen);
-        if (params.get('mode')) result += '&mode=' + encodeURIComponent(params.get('mode'));
-        return result;
-    }
-
-    function onFrameLoad() {
-        if (!ownNavigation) {
-            // The user went somewhere else in the game: stop, and show that page normally.
-            closeHost();
-            return;
-        }
-        ownNavigation = false;
-
-        var gd;
-        try {
-            gd = frame.contentWindow.game_data;
-        } catch (e) { /* not a game page */ }
-        if (!gd || !gd.village) {
-            closeHost();
-            return;
-        }
-        // Keep the address bar in sync, so refreshing opens the village you are on.
-        try {
-            history.replaceState(null, '', cleanUrl());
-            document.title = frame.contentWindow.document.title;
-        } catch (e) { /* ignore */ }
-        target = targetFromGameData(gd);
-        plan = null;
-        start();
-    }
-
-    // Next/previous village the game's own way ("village=n<id>" / "p<id>"), inside the frame.
-    function switchVillage(way) {
-        UI.InfoMessage(way === 'n' ? 'Switching to next village...' : 'Switching to previous village...', 500);
-        $p('#fillWH input.btn').prop('disabled', true);
-        ownNavigation = true;
-        frame.contentWindow.location.href = cleanUrl(way + frame.contentWindow.game_data.village.id);
-    }
-
-    // Back to the normal game page (the page currently shown in the frame), without the panel.
-    // Its full address is kept (e.g. a report or village info page), unless it carries an action
-    // or security token - then only the safe village/screen/mode address is used.
-    function closeHost() {
-        var next = location.href;
-        try {
-            next = frame.contentWindow.location.href;
-            if (/[?&](action|h)=/.test(next)) next = cleanUrl();
-        } catch (e) { /* keep the current address */ }
-        window.FillWH = null;
-        location.href = next;
     }
 
     // Sources that were considered but couldn't send, with what the script read for them.
@@ -465,53 +331,42 @@
             + '</tr>';
     }
 
-    // Decides what Enter does next: move to the next village if a condition is met, else send the next row.
     function focusNext() {
-        var $btn = $p('#fillWH .fillWH-send:enabled').first();
-        if (shouldGoNext()) {
-            $p('#fillWH_next').focus();
-        } else if ($btn.length) {
-            $btn.focus();
-        }
+        var $btn = $('#fillWH .fillWH-send:enabled').first();
+        if ($btn.length) $btn.focus();
     }
 
     function sendRow(i) {
         var row = plan.rows[i];
-        if (!row || row.sent || row.pending) return;
-        row.pending = true;
-        var $buttons = $p('#fillWH .fillWH-send');
+        if (!row || row.sent) return;
+        var $buttons = $('#fillWH .fillWH-send');
         $buttons.prop('disabled', true);
         var sentPlan = plan;
         var sentIncoming = incoming;
-        var targetId = target.id;
 
         TribalWars.post('market', { ajaxaction: 'map_send', village: row.src.id }, {
-            target_id: targetId,
+            target_id: row.targetId,
             wood: row.send.wood,
             stone: row.send.stone,
             iron: row.send.iron
         }, function (response) {
-            row.pending = false;
             row.sent = true;
             UI.SuccessMessage(response && response.message ? response.message : 'Resources sent.');
-            if (plan === sentPlan) $p('#fillWH_row' + i).css('opacity', 0.4).find('.fillWH-send').val('Sent').prop('disabled', true);
+            if (plan === sentPlan) $('#fillWH_row' + i).css('opacity', 0.4).find('.fillWH-send').val('Sent').prop('disabled', true);
             RES.forEach(function (r) { sentIncoming[r] += row.send[r]; });
             if (sentPlan.rows.every(function (x) { return x.sent; })) {
                 UI.SuccessMessage('Done! Warehouse will be at ~' + settings.fillPercent + '%.');
             }
-            if (plan === sentPlan) focusNext();
         }, function () {
             // Game already shows the error message.
-            row.pending = false;
-            if (plan === sentPlan) $p('#fillWH_row' + i + ' .fillWH-send').prop('disabled', false);
         });
 
         // Short delay between clicks keeps us under the game's request rate limit.
         setTimeout(function () {
-            if (plan !== sentPlan) return;
             plan.rows.forEach(function (x, j) {
-                if (!x.sent && !x.pending) $p('#fillWH_row' + j + ' .fillWH-send').prop('disabled', false);
+                if (!x.sent && j !== i) $('#fillWH_row' + j + ' .fillWH-send').prop('disabled', false);
             });
+            if (!row.sent) $('#fillWH_row' + i + ' .fillWH-send').prop('disabled', false);
             focusNext();
         }, 250);
     }
@@ -526,11 +381,6 @@
             + numberInput('fillWH_carry', 'Resources per merchant', settings.carry)
             + numberInput('fillWH_min', 'Skip sends smaller than', settings.minSend)
             + '</table>'
-            + '<h4 style="margin-top:10px;">Go to next village (on Enter) when...</h4>'
-            + checkboxInput('fillWH_nextDone', 'all proposed sends for this village are done', settings.nextWhenDone)
-            + checkboxInput('fillWH_nextGoal', 'this village is already at the goal', settings.nextWhenAtGoal)
-            + checkboxInput('fillWH_nextSource', 'this village is one of my source villages', settings.nextWhenSource)
-            + checkboxInput('fillWH_nextStuck', 'no source village can help', settings.nextWhenStuck)
             + '<h4 style="margin-top:10px;">Source villages (' + '<span id="fillWH_count"></span> selected)</h4>'
             + '<input type="text" id="fillWH_filter" placeholder="Filter by name or coords" style="width:200px;"> '
             + '<input type="button" class="btn" id="fillWH_all" value="Select shown"> '
@@ -570,10 +420,6 @@
             settings.keepPercent = clamp($('#fillWH_keep').val(), 0, 100, DEFAULTS.keepPercent);
             settings.carry = clamp($('#fillWH_carry').val(), 1, 100000, DEFAULTS.carry);
             settings.minSend = clamp($('#fillWH_min').val(), 0, 1000000, DEFAULTS.minSend);
-            settings.nextWhenDone = $('#fillWH_nextDone').prop('checked');
-            settings.nextWhenAtGoal = $('#fillWH_nextGoal').prop('checked');
-            settings.nextWhenSource = $('#fillWH_nextSource').prop('checked');
-            settings.nextWhenStuck = $('#fillWH_nextStuck').prop('checked');
             settings.sources = $('.fillWH-src:checked').map(function () { return parseInt(this.value, 10); }).get();
             saveSettings();
             Dialog.close();
@@ -585,11 +431,6 @@
         return '<tr><td>' + label + '</td><td><input type="number" id="' + id + '" value="' + value + '" style="width:80px;"></td></tr>';
     }
 
-    function checkboxInput(id, label, checked) {
-        return '<div><input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '> '
-            + '<label for="' + id + '">' + label + '</label></div>';
-    }
-
     function clamp(value, min, max, fallback) {
         var n = parseInt(value, 10);
         if (isNaN(n)) return fallback;
@@ -598,25 +439,24 @@
 
     // ---------- start ----------
 
+    // Loads fresh data (so earlier sends are counted) and draws the panel.
     function start() {
-        $p('#fillWH').remove();
+        $('#fillWH input.btn').prop('disabled', true);
         $.when(fetchVillages(), fetchIncoming()).done(function (list, inc) {
             villages = list;
-            incoming = inc;
-            // Use fresh numbers for the current village if the overview has them.
-            villages.forEach(function (v) {
-                if (v.id === target.id) {
-                    RES.forEach(function (r) { target[r] = v[r]; });
-                    if (v.storage) target.storage = v.storage;
-                }
-            });
+            incomingByVillage = inc;
+
+            var current = villages.find(function (v) { return v.id === target.id; });
+            if (current) target = $.extend({}, current);
+
+            incoming = incomingFor(incomingByVillage, target.id);
             renderPanel();
             if (!settings.sources.length) showSettings();
         }).fail(function () {
+            $('#fillWH input.btn').prop('disabled', false);
             UI.ErrorMessage('Fill Warehouse: could not load village data.');
         });
     }
 
-    window.FillWH = { refresh: function () { start(); } };
-    createHost();   // the frame's load event calls start()
+    start();
 })();

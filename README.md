@@ -29,7 +29,7 @@ I would like to request approval (private use) for a market script on world pt11
 
 Script name: Fill Warehouse
 Source code (not obfuscated): https://github.com/Mordokay/tw-fill-warehouse/blob/main/fillWarehouse.js
-Quickbar entry: javascript:$.getScript('https://mordokay.github.io/tw-fill-warehouse/fillWarehouse.js');
+Quickbar entry: javascript:$.getScript('https://cdn.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js');
 
 What it does:
 - It runs on the current village (an underdeveloped village).
@@ -39,7 +39,7 @@ What it does:
 
 What it does not do:
 - It does not send anything automatically or in bulk; every transport is a separate click.
-- It does not communicate with any external server; it only makes requests to the game itself (overview pages and the market send). GitHub Pages is only used to load the file.
+- It does not communicate with any external server; it only makes requests to the game itself (overview pages and the market send). jsDelivr is only used to load the file.
 - Settings are stored only in the browser's localStorage.
 
 It works similarly to scripts already approved on other markets, such as Shinko to Kuma's "Request resources" and "Resource sender".
@@ -63,7 +63,7 @@ In the game, go to **Configurações → Editar barra de acesso rápido → Adic
 | Nome da entrada | `Fill Warehouse` |
 | Dica | optional |
 | URL da imagem | empty |
-| URL de destino | `javascript:$.getScript('https://mordokay.github.io/tw-fill-warehouse/fillWarehouse.js');` |
+| URL de destino | `javascript:$.getScript('https://cdn.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js');` |
 | Abrir numa nova janela | unticked |
 
 **Atribuir** lets you give it a keyboard shortcut, which is handy when going village by village.
@@ -76,20 +76,7 @@ In the game, go to **Configurações → Editar barra de acesso rápido → Adic
    - **In village / Incoming / Goal / Still missing after plan**, one number per resource.
    - A list of proposed sends, closest source first. Press **Enter** repeatedly: each press sends one row, and focus moves to the next.
    - A **Skipped source** table explaining why a source couldn't help, showing the resources, warehouse and merchants the script read for it.
-4. Press **Enter** again (or click **Next village →**). The game switches to the next village (the game's own order and selected group) **without reloading the page**, and the panel stays open and recalculates for the new village. **← Previous village** goes back.
-
-### "Go to next village when..." (what Enter does)
-
-After each send, and when a village loads, the script decides where keyboard focus goes. If any ticked condition is true, focus goes to **Next village →**, so Enter moves on. Otherwise it goes to the next **Send** button.
-
-| Condition | Default |
-|---|---|
-| all proposed sends for this village are done | on |
-| this village is already at the goal | on |
-| this village is one of my source villages | on |
-| no source village can help | off |
-
-This mirrors LA Enhancer's "Go to next village when…" options. The conditions are only checked when you press a key or click, so it's always one click = one action. It never runs through villages by itself.
+4. Go to the next village with the game's own arrows or links, then click the quickbar entry again. Tip: give it a keyboard shortcut with **Atribuir** in the quickbar settings.
 
 Running it again on the same village is safe. Transports already on the way are counted as Incoming, so nothing is sent twice.
 
@@ -104,7 +91,6 @@ Settings are stored in `localStorage` under `fillWH_<world>_<playerId>`, so each
 | Resources per merchant | 1000 | Merchant carrying capacity |
 | Skip sends smaller than | 1000 | Don't propose a send whose total is below this. Also stops planning once the remaining need falls below it. |
 | Source villages | none | Ticked villages, stored as village IDs. The current village is never used as a source, even if ticked. |
-| Go to next village when… | see above | four checkboxes: `nextWhenDone`, `nextWhenAtGoal`, `nextWhenSource`, `nextWhenStuck` |
 
 ---
 
@@ -150,28 +136,9 @@ TribalWars.post('market', { ajaxaction: 'map_send', village: sourceId },
 
 This is the same endpoint the approved Shinko to Kuma scripts use. **One click = one send**, as the rules require. All Send buttons are disabled for 250 ms after each click to stay under the game's request rate limit. On success the row is greyed out, the numbers are added to the in-memory Incoming, and focus moves to the next button.
 
-### Keeping the panel while the village changes (frame host)
+### Moving between villages
 
-When the script starts (`createHost()`), it hides the page's content and shows the same game page in a full-screen iframe (`#fillWH_frame`). The panel is rendered **inside the game page in that frame**, prepended to `#contentContainer`, so it sits just under the menu bar, like a normal page element. All panel DOM access goes through `$p(selector)`, which is jQuery scoped to `panelDoc()`, the frame's document. Styles are injected into both documents. The Settings `Dialog` still opens in the top window.
-
-Changing village is a **normal page load inside the frame**, so the game's scripts, menus and quickbar all work, and the panel in the top window stays.
-
-- **Only the panel's own Previous/Next keep the panel.** `ownNavigation` is set just before the script loads a page in the frame. Any other page load (game links, the game's village arrows, a village in the overview, menus) closes the panel (`closeHost()`), leaving you on that page as a normal page. The user asked for this, because a panel that survives everything felt too aggressive.
-- **Safe addresses** (`cleanUrl()`): the address-bar sync, Next/Previous and the fallback in `closeHost()` only use `village`, `screen` and `mode`, never `action=` or `h=` (security token), so a refresh or reload can't repeat a game action. When the panel closes because you went elsewhere, the full address is kept (for example `info_village&id=…`), unless it contains `action=` or `h=`.
-- **Next/Previous** (`switchVillage(way)`): load the frame's current page with `village=n<id>` or `p<id>`. The game itself resolves that to the next or previous village, following the selected group. The trick of using `n`/`p` comes from LA Enhancer's `getNewVillage()`.
-- **On every frame load** (`onFrameLoad()`): the panel is re-rendered into the new page. The script reads `game_data` from the frame, then `history.replaceState` the top URL to `cleanUrl()`, so refreshing opens the current village. Then refresh the panel for that village.
-- **Quickbar clicked inside the frame**: the script sees `window.top.FillWH` and only refreshes the existing panel, so you never get a second panel.
-- **Close** (`closeHost()`): loads the frame's current page as a normal page, without the panel.
-- Leaving through a game link loads that page twice: once in the frame, then once as the normal page.
-- Sends, the overview requests, `UI` messages and the Settings `Dialog` all run in the top window. The session is the same, so the CSRF token and cookies are the same.
-
-**Attempts that failed:**
-1. Only changing the panel's target: the game stayed on the old village. The user rejected it.
-2. LA Enhancer's full technique: AJAX-loading the next page and swapping `#header_info`, `#topContainer`, `#contentContainer` and `#quickbar_inner`. The game's inline scripts in the swapped content threw errors partway through. The village changed, but the quickbar and menus stopped working, the URL didn't update and the panel disappeared. LA Enhancer only gets away with it because it only swaps the Loot Assistant screen.
-
-Sends are protected against double-sending: a row is `pending` from the click until the game confirms. Each send also captures its plan, target and incoming entry, so a late confirmation after switching village can't touch the new village's panel.
-
-Source villages are never filled: on a source village, no sends are planned.
+The panel only works on the village you are on. You move to the next village with the game itself, and the panel closes like any normal page content. There is deliberately **no "Next village" button**. See *Decisions & history* for the attempts to keep the panel open across villages, and why they were dropped.
 
 ### UI
 
@@ -191,29 +158,26 @@ Source villages are never filled: on a source village, no sends are planned.
 | `renderPanel`, `skippedTable`, `summaryRow`, `focusNext` | main panel |
 | `sendRow` | one market send |
 | `showSettings`, `numberInput`, `clamp` | settings dialog |
-| `targetFromGameData` | current village from `game_data` |
-| `isSource`, `atGoal`, `shouldGoNext` | the "Go to next village when…" conditions |
-| `createHost`, `onFrameLoad`, `frameUrl`, `switchVillage`, `closeHost` | frame host (see above) |
-| `panelDoc`, `$p` | the document the panel lives in (the frame's), and jQuery scoped to it |
-| `start` | fetch both overviews in parallel, then render (opens Settings if there are no sources) |
+| `incomingFor`, `missingTotal` | incoming transports per village; total still needed to reach the goal |
+| `start` | fetch both overviews in parallel, refresh the current village from them, then render (opens Settings if there are no sources) |
 
 ---
 
 ## Hosting & deploying changes
 
 - Repo: <https://github.com/Mordokay/tw-fill-warehouse> (public, branch `main`), cloned at `~/Desktop/FillWarehouse`.
-- Served via **GitHub Pages**: `https://mordokay.github.io/tw-fill-warehouse/fillWarehouse.js` (`application/javascript`, cached for 10 minutes). Pages was enabled on 2026-09-26.
-- Why not the others:
-  - `raw.githubusercontent.com` serves `text/plain` with `nosniff`, which the browser refuses to run.
-  - jsDelivr (`cdn.jsdelivr.net/gh/...@main`) was used first, but it caches which commit `@main` points to for up to about 12 hours, and purging did not reliably fix that (it served a reverted version for a long time). A commit-pinned jsDelivr URL (`@<commit sha>`) updates instantly, but then the quickbar has to change on every update.
+- Quickbar URL (the user's choice): **jsDelivr**, `https://cdn.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js`. The repo must stay public for jsDelivr to serve it.
+- `raw.githubusercontent.com` can't be used: it serves `text/plain` with `nosniff`, which the browser refuses to run.
+- jsDelivr caches which commit `@main` points to for up to about 12 hours, and purging (`https://purge.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js`) did not always work. **After a push, the quickbar can keep loading the previous version for hours.** For an urgent fix, temporarily use a commit-pinned URL (`@<commit sha>`), which updates instantly.
+- GitHub Pages (`https://mordokay.github.io/tw-fill-warehouse/fillWarehouse.js`) was enabled on 2026-09-26 as a faster-updating alternative. It is still on, but the quickbar doesn't use it.
 - After every change:
   ```sh
   node --check fillWarehouse.js
   git commit -am "..." && git push
-  # wait 1-2 min for the Pages build, then confirm it serves the new code:
-  curl -s https://mordokay.github.io/tw-fill-warehouse/fillWarehouse.js | diff -q - fillWarehouse.js && echo up to date
+  curl -s "https://purge.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js"
+  # check whether the CDN serves the new code yet (it may take hours):
+  curl -s https://cdn.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js | diff -q - fillWarehouse.js && echo up to date
   ```
-  Players get the new version within about 10 minutes (browser cache). The quickbar link never has to change.
 
 ## Verified in-game (2026-09-26, pt117, desktop)
 
@@ -234,8 +198,9 @@ Source villages are never filled: on a source village, no sends are planned.
    - Coordinates were shown twice, so the extra ones were removed.
    - **Next village**, attempt 1 (reverted): made Next village change only the panel's *target* while the game stayed on the old village. The user rejected this as the wrong approach, because the game's village must actually change.
    - **Next village**, attempt 2: the user pointed to LA Enhancer, and its page-swap technique was copied, along with its "Go to next village when…" conditions. In-game it broke the quickbar and menus, the URL didn't update and the panel vanished.
-   - **Next village**, attempt 3 (current): the frame host. The first version put the panel above the whole game, which the user didn't want. It now goes inside the game page, under the menu bar. After that, the panel stayed through *every* navigation, which the user found too aggressive. Now only the panel's own Previous/Next keep it. The game runs in an iframe under the panel, so village changes are real page loads. It was tested end-to-end against a local mock server before release.
-6. The script is hosted on GitHub because the quickbar needs a URL. It was on jsDelivr first and moved to GitHub Pages after jsDelivr kept serving a stale `@main`.
+   - **Next village**, attempt 3: the frame host. The first version put the panel above the whole game, which the user didn't want. It now goes inside the game page, under the menu bar. After that, the panel stayed through *every* navigation, which the user found too aggressive. Now only the panel's own Previous/Next keep it. The game runs in an iframe under the panel, so village changes are real page loads. It was tested end-to-end against a local mock server before release. It worked, but it hid the whole game page and reloaded it in a frame. The user and Claude agreed that this was too invasive ("messing a lot with the game") and a risk for approval.
+   - **Final decision (2026-09-27):** go back to the version jsDelivr had been serving (`b951fdd`), which was attempt 1 because of jsDelivr's cache, and remove its Next village button and "(open village)" link. The panel works on the current village only. You move between villages with the game itself and reopen the panel from the quickbar or its keyboard shortcut. This is the conventional behaviour of approved scripts.
+6. The script is hosted on GitHub because the quickbar needs a URL. It was on jsDelivr, briefly moved to GitHub Pages because jsDelivr's `@main` went stale, then went back to jsDelivr at the user's request.
 7. Approval: a support ticket was prepared (category *Perguntas*). The alternative route is submitting to the Script Library via zz1.
 
 ## Known limitations / ideas
@@ -243,7 +208,6 @@ Source villages are never filled: on a source village, no sends are planned.
 - **Desktop layout only.** The mobile overview HTML is different and isn't parsed.
 - The table column positions in the incoming-transports page (`cells[4]`, `cells[8]`) could break if InnoGames changes its layout. If Incoming ever shows 0 while transports are on their way, check this first.
 - Merchant capacity is a setting, not read from the game.
-- The frame host needs the game to allow being shown in a frame. It currently sends `X-Frame-Options: NONE`, which doesn't block framing. If InnoGames starts blocking it, the frame will show an error page.
-- **Testing rule:** never automate a browser against the real game or with a logged-in profile (the user was banned once). Mock tests only: a local server on 127.0.0.1 plus a throwaway headless-Chrome profile. The mock and test script used for attempt 3 were temporary and weren't kept.
+- **Testing rule:** never automate a browser against the real game or with a logged-in profile (the user was banned once). Mock tests only: a local server on 127.0.0.1 plus a throwaway headless-Chrome profile. The mock server and test scripts were temporary and weren't kept.
 - The script doesn't estimate how long each transport will take to arrive; it only shows distance.
 - Possible future ideas: a stored list of target villages with a "next target" button; picking sources by group instead of checkboxes; preparing the Script Library submission (it needs an in-game config UI, which this already has).
