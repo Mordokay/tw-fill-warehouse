@@ -266,7 +266,7 @@
                 + '<th>Merchants</th><th></th></tr>';
             plan.rows.forEach(function (row, i) {
                 html += '<tr id="fillWH_row' + i + '">'
-                    + '<td>' + esc(row.src.name) + ' (' + row.src.x + '|' + row.src.y + ')</td>'
+                    + '<td>' + esc(row.src.name) + '</td>'
                     + '<td>' + row.distance.toFixed(1) + '</td>'
                     + RES.map(function (r) { return '<td>' + fmt(row.send[r]) + '</td>'; }).join('')
                     + '<td>' + row.merchants + ' / ' + row.src.merchants + '</td>'
@@ -303,7 +303,7 @@
             + RES.map(function (r) { return '<th>' + resIcon(r) + '</th>'; }).join('')
             + '<th>Warehouse</th><th>Merchants</th><th>Reason</th></tr>';
         plan.skipped.forEach(function (s) {
-            html += '<tr><td>' + esc(s.src.name) + ' (' + s.src.x + '|' + s.src.y + ')</td>'
+            html += '<tr><td>' + esc(s.src.name) + '</td>'
                 + RES.map(function (r) { return '<td>' + fmt(s.src[r]) + '</td>'; }).join('')
                 + '<td>' + fmt(s.src.storage) + '</td>'
                 + '<td>' + s.src.merchants + '</td>'
@@ -386,7 +386,7 @@
             var checked = settings.sources.indexOf(v.id) >= 0 ? ' checked' : '';
             html += '<tr class="fillWH-vrow" data-search="' + esc((v.name + ' ' + v.x + '|' + v.y).toLowerCase()) + '">'
                 + '<td><input type="checkbox" class="fillWH-src" value="' + v.id + '"' + checked + '></td>'
-                + '<td style="text-align:left;">' + esc(v.name) + ' (' + v.x + '|' + v.y + ')</td>'
+                + '<td style="text-align:left;">' + esc(v.name) + '</td>'
                 + '<td>' + fmt(v.storage) + '</td>'
                 + RES.map(function (r) { return '<td>' + fmt(v[r]) + '</td>'; }).join('')
                 + '</tr>';
