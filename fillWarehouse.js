@@ -338,7 +338,9 @@
 
     function sendRow(i) {
         var row = plan.rows[i];
-        if (!row || row.sent) return;
+        // A row stays "pending" from the click until the game answers, so it can't be sent twice.
+        if (!row || row.sent || row.pending) return;
+        row.pending = true;
         var $buttons = $('#fillWH .fillWH-send');
         $buttons.prop('disabled', true);
         var sentPlan = plan;
@@ -350,6 +352,7 @@
             stone: row.send.stone,
             iron: row.send.iron
         }, function (response) {
+            row.pending = false;
             row.sent = true;
             UI.SuccessMessage(response && response.message ? response.message : 'Resources sent.');
             if (plan === sentPlan) $('#fillWH_row' + i).css('opacity', 0.4).find('.fillWH-send').val('Sent').prop('disabled', true);
@@ -357,16 +360,19 @@
             if (sentPlan.rows.every(function (x) { return x.sent; })) {
                 UI.SuccessMessage('Done! Warehouse will be at ~' + settings.fillPercent + '%.');
             }
+            if (plan === sentPlan) focusNext();
         }, function () {
-            // Game already shows the error message.
+            // Game already shows the error message; allow retrying this row.
+            row.pending = false;
+            if (plan === sentPlan) $('#fillWH_row' + i + ' .fillWH-send').prop('disabled', false);
         });
 
         // Short delay between clicks keeps us under the game's request rate limit.
         setTimeout(function () {
+            if (plan !== sentPlan) return;
             plan.rows.forEach(function (x, j) {
-                if (!x.sent && j !== i) $('#fillWH_row' + j + ' .fillWH-send').prop('disabled', false);
+                if (!x.sent && !x.pending) $('#fillWH_row' + j + ' .fillWH-send').prop('disabled', false);
             });
-            if (!row.sent) $('#fillWH_row' + i + ' .fillWH-send').prop('disabled', false);
             focusNext();
         }, 250);
     }

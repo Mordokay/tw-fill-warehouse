@@ -134,7 +134,7 @@ TribalWars.post('market', { ajaxaction: 'map_send', village: sourceId },
                 { target_id, wood, stone, iron }, onSuccess, onError);
 ```
 
-This is the same endpoint the approved Shinko to Kuma scripts use. **One click = one send**, as the rules require. All Send buttons are disabled for 250 ms after each click to stay under the game's request rate limit. On success the row is greyed out, the numbers are added to the in-memory Incoming, and focus moves to the next button.
+This is the same endpoint the approved Shinko to Kuma scripts use. **One click = one send**, as the rules require. All Send buttons are disabled for 250 ms after each click to stay under the game's request rate limit. The clicked row stays locked (`pending`) until the game answers, so it can never be sent twice (since `v1.0.1`). On success the row is greyed out, the numbers are added to the in-memory Incoming, and focus moves to the next button. On failure the row is unlocked so you can retry.
 
 ### Moving between villages
 
@@ -178,6 +178,17 @@ The panel only works on the village you are on. You move to the next village wit
   # check whether the CDN serves the new code yet (it may take hours):
   curl -s https://cdn.jsdelivr.net/gh/Mordokay/tw-fill-warehouse@main/fillWarehouse.js | diff -q - fillWarehouse.js && echo up to date
   ```
+
+## Versions
+
+Each version is tagged. A tagged jsDelivr URL (`@vX.Y.Z`) is served immediately and never changes, unlike `@main`.
+
+| Tag | Commit | What |
+|---|---|---|
+| `v1.0.0` | `635d111` | First version given to reviewers (tested in-game on pt117). The reviewers got the `@main` link, which may still have served the older `b951fdd` copy, with a Next village button, because of jsDelivr's cache. |
+| `v1.0.1` | see tag | **Double-send fix.** Before, if the game took longer than 250 ms to confirm a send, pressing Enter again re-sent the same row. In a mock test with a 1.5 s delay, 5 Enter presses produced 5 transports. Now a row is `pending` from the click until the game answers, and can't be sent again. If the game rejects the send, the row is re-enabled so you can retry. |
+
+**Source villages as targets are allowed on purpose.** If you run the panel on one of your source villages, it can plan to fill it from the other sources. The user decided this is a feature, for when a source village needs resources for a special reason.
 
 ## Verified in-game (2026-09-26, pt117, desktop)
 
