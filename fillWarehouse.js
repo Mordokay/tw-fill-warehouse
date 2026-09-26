@@ -160,6 +160,7 @@
             .sort(function (a, b) { return distance(a) - distance(b); });
 
         var rows = [];
+        var skipped = [];
         sources.forEach(function (src) {
             if (sum(need) < settings.minSend) return;
             var keep = Math.floor(src.storage * settings.keepPercent / 100);
@@ -167,6 +168,15 @@
             RES.forEach(function (r) {
                 send[r] = Math.min(need[r], Math.max(0, src[r] - keep));
             });
+
+            if (!src.merchants) {
+                skipped.push({ src: src, reason: 'no free merchants' });
+                return;
+            }
+            if (sum(send) === 0) {
+                skipped.push({ src: src, reason: 'nothing above ' + settings.keepPercent + '% keep (' + fmt(keep) + ') of a missing resource' });
+                return;
+            }
 
             // Scale down evenly if there aren't enough merchants for everything.
             var capacity = src.merchants * settings.carry;
@@ -176,7 +186,10 @@
                 RES.forEach(function (r) { send[r] = Math.floor(send[r] * factor); });
                 total = sum(send);
             }
-            if (total < settings.minSend) return;
+            if (total < settings.minSend) {
+                skipped.push({ src: src, reason: 'could only send ' + fmt(total) + ' (below minimum ' + fmt(settings.minSend) + ')' });
+                return;
+            }
 
             RES.forEach(function (r) { need[r] -= send[r]; });
             rows.push({
@@ -188,7 +201,19 @@
             });
         });
 
-        return { goal: goal, remaining: need, rows: rows };
+        var found = sources.map(function (v) { return v.id; });
+        var missing = settings.sources.filter(function (id) {
+            return id !== target.id && found.indexOf(id) < 0;
+        });
+
+        return {
+            goal: goal,
+            remaining: need,
+            rows: rows,
+            skipped: skipped,
+            missing: missing,
+            sourceCount: sources.length
+        };
     }
 
     // ---------- UI ----------
@@ -223,7 +248,18 @@
         if (!settings.sources.length) {
             html += '<p><b>No source villages configured.</b> Open Settings to pick them.</p>';
         } else if (!plan.rows.length) {
-            html += '<p><b>Nothing to send.</b> This village is already at the goal, or no source has spare resources/merchants.</p>';
+            var missingTotal = sum({
+                wood: Math.max(0, plan.goal - target.wood - incoming.wood),
+                stone: Math.max(0, plan.goal - target.stone - incoming.stone),
+                iron: Math.max(0, plan.goal - target.iron - incoming.iron)
+            });
+            if (missingTotal < settings.minSend) {
+                html += '<p><b>Nothing to send.</b> This village is already at the goal.</p>';
+            } else if (!plan.sourceCount) {
+                html += '<p><b>Nothing to send.</b> None of your source villages were found (only this village is selected, or the overview could not be read).</p>';
+            } else {
+                html += '<p><b>Nothing to send.</b> None of your source villages can help right now:</p>';
+            }
         } else {
             html += '<table class="vis fillWH-table" width="100%"><tr><th>Source</th><th>Distance</th>'
                 + RES.map(function (r) { return '<th>' + resIcon(r) + '</th>'; }).join('')
@@ -240,7 +276,9 @@
             html += '</table>';
         }
 
-        var next = $('#village_switch_right').attr('href');
+        html += skippedTable();
+
+        var next =$('#village_switch_right').attr('href');
         html += '<div style="margin-top:6px;">'
             + '<input type="button" class="btn" id="fillWH_settings" value="Settings"> '
             + '<input type="button" class="btn" id="fillWH_refresh" value="Recalculate"> '
@@ -256,6 +294,26 @@
         $('#fillWH_refresh').on('click', start);
         $('#fillWH_close').on('click', function () { $('#fillWH').remove(); });
         focusNext();
+    }
+
+    // Sources that were considered but couldn't send, with what the script read for them.
+    function skippedTable() {
+        if (!plan.skipped.length && !plan.missing.length) return '';
+        var html = '<table class="vis fillWH-table" style="margin-top:6px;"><tr><th>Skipped source</th>'
+            + RES.map(function (r) { return '<th>' + resIcon(r) + '</th>'; }).join('')
+            + '<th>Warehouse</th><th>Merchants</th><th>Reason</th></tr>';
+        plan.skipped.forEach(function (s) {
+            html += '<tr><td>' + esc(s.src.name) + ' (' + s.src.x + '|' + s.src.y + ')</td>'
+                + RES.map(function (r) { return '<td>' + fmt(s.src[r]) + '</td>'; }).join('')
+                + '<td>' + fmt(s.src.storage) + '</td>'
+                + '<td>' + s.src.merchants + '</td>'
+                + '<td style="text-align:left;">' + s.reason + '</td></tr>';
+        });
+        if (plan.missing.length) {
+            html += '<tr><td colspan="7" style="text-align:left;">' + plan.missing.length
+                + ' selected village(s) not found in your production overview (id: ' + plan.missing.join(', ') + ')</td></tr>';
+        }
+        return html + '</table>';
     }
 
     function summaryRow(label, r) {
