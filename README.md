@@ -76,7 +76,8 @@ In the game, go to **Configurações → Editar barra de acesso rápido → Adic
    - **In village / Incoming / Goal / Still missing after plan**, one number per resource.
    - A list of proposed sends, closest source first. Press **Enter** repeatedly: each press sends one row, and focus moves to the next.
    - A **Skipped source** table explaining why a source couldn't help, showing the resources, warehouse and merchants the script read for it.
-4. Click **Next village →** (the game's own "next village" link) and repeat.
+4. Click **Next village →**. The panel stays open: it re-reads both overviews (so the sends you just made are counted) and switches to the next village, in your overview order, that is **not a source** and is still below the goal. The game page itself doesn't change. Use **(open village)** next to the name if you want the game to go to that village (that reloads the page and closes the panel).
+5. When every non-source village is at the goal, you'll see *All non-source villages are at the goal.*
 
 Running it again on the same village is safe. Transports already on the way are counted as Incoming, so nothing is sent twice.
 
@@ -104,7 +105,7 @@ Everything is in a single file, `fillWarehouse.js`, wrapped in an IIFE. It uses 
 |---|---|---|
 | Current village (id, name, coords, resources, warehouse) | `game_data.village`, then overwritten with fresher numbers from the production overview | `start()` |
 | All own villages: resources, warehouse, free merchants, coords | `overview_villages&mode=prod&group=0&page=-1` → `#production_table` rows. Village from `span.quickedit-vn` (`data-id`, last `x\|y` in its text); resources from `span.res/.warn_90/.warn` `.wood/.stone/.iron`; warehouse = the next `<td>`; merchants = the `<td>` after that (`free/total`) | `fetchVillages()` |
-| Resources travelling to the current village | `overview_villages&mode=trader&type=inc&group=0&page=-1` → `#trades_table` rows. Destination village id is read from the link in `cells[4]`, resources from the children of `cells[8]` (type from class name `wood/stone/iron`) | `fetchIncoming()` |
+| Resources travelling to each of your villages (map by village id) | `overview_villages&mode=trader&type=inc&group=0&page=-1` → `#trades_table` rows. Destination village id is read from the link in `cells[4]`, resources from the children of `cells[8]` (type from class name `wood/stone/iron`) | `fetchIncoming()` |
 
 URLs are built with `game_data.link_base_pure`, so they also work when sitting another account. The column positions come from Shinko to Kuma's Warehouse Balancer and were **verified in-game on pt117 (desktop layout)**.
 
@@ -154,7 +155,9 @@ This is the same endpoint the approved Shinko to Kuma scripts use. **One click =
 | `renderPanel`, `skippedTable`, `summaryRow`, `focusNext` | main panel |
 | `sendRow` | one market send |
 | `showSettings`, `numberInput`, `clamp` | settings dialog |
-| `start` | fetch both overviews in parallel, then render (opens Settings if there are no sources) |
+| `incomingFor`, `missingTotal` | incoming entry per village; total still needed to reach the goal |
+| `findNextTarget` | next village in overview order that isn't a source and has `missingTotal ≥ minSend` (wraps around) |
+| `start(advance)` | fetch both overviews in parallel, refresh the target from them, optionally move to `findNextTarget()`, then render (opens Settings if there are no sources) |
 
 ---
 
@@ -189,6 +192,7 @@ This is the same endpoint the approved Shinko to Kuma scripts use. **One click =
    - Columns were too tight, so padding was added.
    - "Nothing to send" wrongly claimed the village was at the goal. The panel now gives the real reason and shows a Skipped source table.
    - Coordinates were shown twice, so the extra ones were removed.
+   - The game's **Next village** link reloaded the page and closed the panel. Next village now switches the panel's target in place: the target doesn't need to be the village the game is showing, because a send only needs `target_id`. The panel can't restart itself after a page reload, since that would need a userscript, which the rules ban. Each send stores the target it was planned for (`row.targetId`), so a late confirmation can't be counted for the wrong village.
 6. The script was hosted on GitHub + jsDelivr because the quickbar needs a URL.
 7. Approval: a support ticket was prepared (category *Perguntas*). The alternative route is submitting to the Script Library via zz1.
 
@@ -198,4 +202,4 @@ This is the same endpoint the approved Shinko to Kuma scripts use. **One click =
 - The table column positions in the incoming-transports page (`cells[4]`, `cells[8]`) could break if InnoGames changes its layout. If Incoming ever shows 0 while transports are on their way, check this first.
 - Merchant capacity is a setting, not read from the game.
 - The script doesn't estimate how long each transport will take to arrive; it only shows distance.
-- Possible future ideas: a stored list of target villages with a "next target" button; picking sources by group instead of checkboxes; preparing the Script Library submission (it needs an in-game config UI, which this already has).
+- Possible future ideas: picking sources by group instead of checkboxes; preparing the Script Library submission (it needs an in-game config UI, which this already has).
