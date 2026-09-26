@@ -89,6 +89,19 @@
         };
     }
 
+    // The panel lives inside the game page shown in the frame (just under the menu bar).
+    function panelDoc() {
+        try {
+            return frame && frame.contentDocument && frame.contentDocument.body ? frame.contentDocument : document;
+        } catch (e) {
+            return document;
+        }
+    }
+
+    function $p(selector) {
+        return $(selector, panelDoc());
+    }
+
     function url(query) {
         return game_data.link_base_pure + query;
     }
@@ -246,17 +259,19 @@
     // ---------- UI ----------
 
     function injectStyles() {
-        if ($('#fillWH_styles').length) return;
-        $('head').append('<style id="fillWH_styles">'
-            + '.fillWH-table th, .fillWH-table td { padding: 3px 14px; }'
-            + '.fillWH-table td:not(:first-child) { text-align: right; }'
-            + '.fillWH-table th { text-align: center; }'
-            + '</style>');
+        [document, panelDoc()].forEach(function (doc) {
+            if ($('#fillWH_styles', doc).length) return;
+            $('head', doc).append('<style id="fillWH_styles">'
+                + '.fillWH-table th, .fillWH-table td { padding: 3px 14px; }'
+                + '.fillWH-table td:not(:first-child) { text-align: right; }'
+                + '.fillWH-table th { text-align: center; }'
+                + '</style>');
+        });
     }
 
     function renderPanel() {
         injectStyles();
-        $('#fillWH').remove();
+        $p('#fillWH').remove();
         plan = buildPlan();
 
         var html = '<div id="fillWH" class="vis" style="margin:5px 0;padding:6px;">'
@@ -310,14 +325,15 @@
             + '<input type="button" class="btn" id="fillWH_close" value="Close">'
             + '</div></div>';
 
-        $('#fillWH_area').prepend(html);
+        var $container = $p('#contentContainer');
+        ($container.length ? $container : $p('body')).first().prepend(html);
 
-        $('#fillWH .fillWH-send').on('click', function () { sendRow(parseInt($(this).data('row'), 10)); });
-        $('#fillWH_prev').on('click', function () { switchVillage('p'); });
-        $('#fillWH_next').on('click', function () { switchVillage('n'); });
-        $('#fillWH_settings').on('click', showSettings);
-        $('#fillWH_refresh').on('click', start);
-        $('#fillWH_close').on('click', closeHost);
+        $p('#fillWH .fillWH-send').on('click', function () { sendRow(parseInt($(this).data('row'), 10)); });
+        $p('#fillWH_prev').on('click', function () { switchVillage('p'); });
+        $p('#fillWH_next').on('click', function () { switchVillage('n'); });
+        $p('#fillWH_settings').on('click', showSettings);
+        $p('#fillWH_refresh').on('click', start);
+        $p('#fillWH_close').on('click', closeHost);
         focusNext();
     }
 
@@ -353,9 +369,8 @@
         $('body').children().hide();
         $('body').css({ margin: 0, overflow: 'hidden' });
         var $host = $('<div id="fillWH_host" style="position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;"></div>');
-        var $area = $('<div id="fillWH_area" style="flex:0 0 auto;max-height:45vh;overflow:auto;"></div>');
         frame = $('<iframe id="fillWH_frame" style="flex:1 1 auto;width:100%;border:0;"></iframe>')[0];
-        $host.append($area, frame);
+        $host.append(frame);
         $('body').append($host);
         frame.addEventListener('load', onFrameLoad);
         frame.src = startUrl;
@@ -373,10 +388,10 @@
             gd = frame.contentWindow.game_data;
         } catch (e) { /* not a game page */ }
         if (!gd || !gd.village) {
-            $('#fillWH').remove();
-            $('#fillWH_area').html('<div id="fillWH" class="vis" style="padding:6px;">Fill Warehouse: this page has no village. '
+            $p('#fillWH').remove();
+            $p('body').prepend('<div id="fillWH" class="vis" style="padding:6px;">Fill Warehouse: this page has no village. '
                 + '<input type="button" class="btn" id="fillWH_close" value="Close"></div>');
-            $('#fillWH_close').on('click', closeHost);
+            $p('#fillWH_close').on('click', closeHost);
             return;
         }
         // Keep the address bar in sync, so refreshing opens the village you are on.
@@ -394,7 +409,7 @@
         var gw = frame.contentWindow;
         var id = gw.game_data.village.id;
         UI.InfoMessage(way === 'n' ? 'Switching to next village...' : 'Switching to previous village...', 500);
-        $('#fillWH input.btn').prop('disabled', true);
+        $p('#fillWH input.btn').prop('disabled', true);
         var href = gw.location.href;
         gw.location.href = /[?&]village=[np]?\d+/.test(href)
             ? href.replace(/([?&]village=)[np]?\d+/, '$1' + way + id)
@@ -436,9 +451,9 @@
 
     // Decides what Enter does next: move to the next village if a condition is met, else send the next row.
     function focusNext() {
-        var $btn = $('#fillWH .fillWH-send:enabled').first();
+        var $btn = $p('#fillWH .fillWH-send:enabled').first();
         if (shouldGoNext()) {
-            $('#fillWH_next').focus();
+            $p('#fillWH_next').focus();
         } else if ($btn.length) {
             $btn.focus();
         }
@@ -448,7 +463,7 @@
         var row = plan.rows[i];
         if (!row || row.sent || row.pending) return;
         row.pending = true;
-        var $buttons = $('#fillWH .fillWH-send');
+        var $buttons = $p('#fillWH .fillWH-send');
         $buttons.prop('disabled', true);
         var sentPlan = plan;
         var sentIncoming = incoming;
@@ -463,7 +478,7 @@
             row.pending = false;
             row.sent = true;
             UI.SuccessMessage(response && response.message ? response.message : 'Resources sent.');
-            if (plan === sentPlan) $('#fillWH_row' + i).css('opacity', 0.4).find('.fillWH-send').val('Sent').prop('disabled', true);
+            if (plan === sentPlan) $p('#fillWH_row' + i).css('opacity', 0.4).find('.fillWH-send').val('Sent').prop('disabled', true);
             RES.forEach(function (r) { sentIncoming[r] += row.send[r]; });
             if (sentPlan.rows.every(function (x) { return x.sent; })) {
                 UI.SuccessMessage('Done! Warehouse will be at ~' + settings.fillPercent + '%.');
@@ -472,14 +487,14 @@
         }, function () {
             // Game already shows the error message.
             row.pending = false;
-            if (plan === sentPlan) $('#fillWH_row' + i + ' .fillWH-send').prop('disabled', false);
+            if (plan === sentPlan) $p('#fillWH_row' + i + ' .fillWH-send').prop('disabled', false);
         });
 
         // Short delay between clicks keeps us under the game's request rate limit.
         setTimeout(function () {
             if (plan !== sentPlan) return;
             plan.rows.forEach(function (x, j) {
-                if (!x.sent && !x.pending) $('#fillWH_row' + j + ' .fillWH-send').prop('disabled', false);
+                if (!x.sent && !x.pending) $p('#fillWH_row' + j + ' .fillWH-send').prop('disabled', false);
             });
             focusNext();
         }, 250);
@@ -568,7 +583,7 @@
     // ---------- start ----------
 
     function start() {
-        $('#fillWH').remove();
+        $p('#fillWH').remove();
         $.when(fetchVillages(), fetchIncoming()).done(function (list, inc) {
             villages = list;
             incoming = inc;

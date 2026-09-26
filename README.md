@@ -152,14 +152,12 @@ This is the same endpoint the approved Shinko to Kuma scripts use. **One click =
 
 ### Keeping the panel while the village changes (frame host)
 
-When the script starts (`createHost()`), it hides the page's content and shows two things:
-- **at the top**: the panel (`#fillWH_area`, at most 45% of the screen, scrolls if longer)
-- **below it**: an iframe (`#fillWH_frame`) loading the same game page
+When the script starts (`createHost()`), it hides the page's content and shows the same game page in a full-screen iframe (`#fillWH_frame`). The panel is rendered **inside the game page in that frame**, prepended to `#contentContainer`, so it sits just under the menu bar, like a normal page element. All panel DOM access goes through `$p(selector)`, which is jQuery scoped to `panelDoc()`, the frame's document. Styles are injected into both documents. The Settings `Dialog` still opens in the top window.
 
 Changing village is a **normal page load inside the frame**, so the game's scripts, menus and quickbar all work, and the panel in the top window stays.
 
 - **Next/Previous** (`switchVillage(way)`): load the frame's current page with `village=n<id>` or `p<id>`. The game itself resolves that to the next or previous village, following the selected group. The trick of using `n`/`p` comes from LA Enhancer's `getNewVillage()`.
-- **On every frame load** (`onFrameLoad()`): read `game_data` from the frame, then `history.replaceState` the top URL to the frame's URL (with `n123` replaced by the real id), so refreshing opens the current village. Then refresh the panel for that village. The panel also follows any other navigation inside the frame.
+- **On every frame load** (`onFrameLoad()`): the panel is re-rendered into the new page. The script reads `game_data` from the frame, then `history.replaceState` the top URL to the frame's URL (with `n123` replaced by the real id), so refreshing opens the current village. Then refresh the panel for that village. The panel also follows any other navigation inside the frame.
 - **Quickbar clicked inside the frame**: the script sees `window.top.FillWH` and only refreshes the existing panel, so you never get a second panel.
 - **Close** (`closeHost()`): loads the frame's current page as a normal page, without the panel.
 - Sends, the overview requests, `UI` messages and the Settings `Dialog` all run in the top window. The session is the same, so the CSRF token and cookies are the same.
@@ -193,6 +191,7 @@ Source villages are never filled: on a source village, no sends are planned.
 | `targetFromGameData` | current village from `game_data` |
 | `isSource`, `atGoal`, `shouldGoNext` | the "Go to next village when…" conditions |
 | `createHost`, `onFrameLoad`, `frameUrl`, `switchVillage`, `closeHost` | frame host (see above) |
+| `panelDoc`, `$p` | the document the panel lives in (the frame's), and jQuery scoped to it |
 | `start` | fetch both overviews in parallel, then render (opens Settings if there are no sources) |
 
 ---
@@ -232,7 +231,7 @@ Source villages are never filled: on a source village, no sends are planned.
    - Coordinates were shown twice, so the extra ones were removed.
    - **Next village**, attempt 1 (reverted): made Next village change only the panel's *target* while the game stayed on the old village. The user rejected this as the wrong approach, because the game's village must actually change.
    - **Next village**, attempt 2: the user pointed to LA Enhancer, and its page-swap technique was copied, along with its "Go to next village when…" conditions. In-game it broke the quickbar and menus, the URL didn't update and the panel vanished.
-   - **Next village**, attempt 3 (current): the frame host. The game runs in an iframe under the panel, so village changes are real page loads. It was tested end-to-end against a local mock server before release.
+   - **Next village**, attempt 3 (current): the frame host. The first version put the panel above the whole game, which the user didn't want. It now goes inside the game page, under the menu bar. The game runs in an iframe under the panel, so village changes are real page loads. It was tested end-to-end against a local mock server before release.
 6. The script is hosted on GitHub because the quickbar needs a URL. It was on jsDelivr first and moved to GitHub Pages after jsDelivr kept serving a stale `@main`.
 7. Approval: a support ticket was prepared (category *Perguntas*). The alternative route is submitting to the Script Library via zz1.
 
