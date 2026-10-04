@@ -42,6 +42,7 @@
     var incomingByVillage = {};                    // village id -> resources on the way
     var incoming = { wood: 0, stone: 0, iron: 0 }; // entry for the current target
     var plan = null;
+    var customGoal = null;   // exact amounts typed in the panel ({wood, stone, iron}), or null for the % goal
 
     // ---------- storage ----------
 
@@ -153,22 +154,34 @@
         return byVillage[id];
     }
 
+    // Goal per resource: the exact amounts typed in the panel (never more than the warehouse
+    // holds), or the fill % from Settings.
+    function goalFor(v) {
+        var goal = {};
+        RES.forEach(function (r) {
+            goal[r] = customGoal
+                ? Math.min(customGoal[r], v.storage)
+                : Math.floor(v.storage * settings.fillPercent / 100);
+        });
+        return goal;
+    }
+
     // Total still needed to reach the goal, counting what's already on the way.
     function missingTotal(v) {
-        var goal = Math.floor(v.storage * settings.fillPercent / 100);
+        var goal = goalFor(v);
         var inc = incomingFor(incomingByVillage, v.id);
         return RES.reduce(function (total, r) {
-            return total + Math.max(0, goal - v[r] - inc[r]);
+            return total + Math.max(0, goal[r] - v[r] - inc[r]);
         }, 0);
     }
 
     // ---------- planning ----------
 
     function buildPlan() {
-        var goal = Math.floor(target.storage * settings.fillPercent / 100);
+        var goal = goalFor(target);
         var need = {};
         RES.forEach(function (r) {
-            need[r] = Math.max(0, goal - target[r] - incoming[r]);
+            need[r] = Math.max(0, goal[r] - target[r] - incoming[r]);
         });
 
         var sources = villages
@@ -256,10 +269,24 @@
             + '</tr>'
             + summaryRow('In village', target)
             + summaryRow('Incoming', incoming)
-            + summaryRow('Goal (' + settings.fillPercent + '% of ' + fmt(target.storage) + ')',
-                { wood: plan.goal, stone: plan.goal, iron: plan.goal })
+            + summaryRow(customGoal ? 'Goal (exact amounts)' : 'Goal (' + settings.fillPercent + '% of ' + fmt(target.storage) + ')', plan.goal)
             + summaryRow('Still missing after plan', plan.remaining)
-            + '</table>';
+            + '<tr><td>Exact amounts</td>'
+            + RES.map(function (r) {
+                return '<td><input type="text" class="fillWH-amount" data-res="' + r + '" size="7" style="text-align:right;"'
+                    + ' value="' + (customGoal ? fmt(customGoal[r]) : '') + '"></td>';
+            }).join('')
+            + '</tr></table>'
+            + '<div style="margin-bottom:6px;">'
+            + '<input type="button" class="btn" id="fillWH_useAmounts" value="Use amounts"> '
+            + (customGoal ? '<input type="button" class="btn" id="fillWH_usePercent" value="Use % (' + settings.fillPercent + '%)">' : '')
+            + ' <span style="font-size:0.9em;">Type the total you need in the village (e.g. a building\'s cost); what it has and what is on the way is subtracted.</span>'
+            + '</div>';
+
+        if (customGoal && RES.some(function (r) { return customGoal[r] > target.storage; })) {
+            html += '<p><b>Warning:</b> some amounts are bigger than the warehouse (' + fmt(target.storage)
+                + '), so they were capped to the warehouse size.</p>';
+        }
 
         if (!settings.sources.length) {
             html += '<p><b>No source villages configured.</b> Open Settings to pick them.</p>';
@@ -301,8 +328,29 @@
         $('#fillWH .fillWH-send').on('click', function () { sendRow(parseInt($(this).data('row'), 10)); });
         $('#fillWH_settings').on('click', showSettings);
         $('#fillWH_refresh').on('click', function () { start(); });
+        $('#fillWH_useAmounts').on('click', useAmounts);
+        $('#fillWH_usePercent').on('click', function () { customGoal = null; start(); });
+        $('#fillWH .fillWH-amount').on('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                useAmounts();
+            }
+        });
         $('#fillWH_close').on('click', function () { $('#fillWH').remove(); });
         focusNext();
+    }
+
+    // Reads the three amount fields. Empty field = that resource isn't needed; all empty = back to %.
+    function useAmounts() {
+        var amounts = {};
+        var any = false;
+        $('#fillWH .fillWH-amount').each(function () {
+            var value = $(this).val().trim();
+            amounts[$(this).data('res')] = parseNumber(value);
+            if (value !== '') any = true;
+        });
+        customGoal = any ? amounts : null;
+        start();
     }
 
     // Sources that were considered but couldn't send, with what the script read for them.
@@ -358,7 +406,9 @@
             if (plan === sentPlan) $('#fillWH_row' + i).css('opacity', 0.4).find('.fillWH-send').val('Sent').prop('disabled', true);
             RES.forEach(function (r) { sentIncoming[r] += row.send[r]; });
             if (sentPlan.rows.every(function (x) { return x.sent; })) {
-                UI.SuccessMessage('Done! Warehouse will be at ~' + settings.fillPercent + '%.');
+                UI.SuccessMessage(customGoal
+                    ? 'Done! The requested amounts are on their way.'
+                    : 'Done! Warehouse will be at ~' + settings.fillPercent + '%.');
             }
             if (plan === sentPlan) focusNext();
         }, function () {

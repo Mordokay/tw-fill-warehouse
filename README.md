@@ -76,6 +76,7 @@ In the game, go to **Configurações → Editar barra de acesso rápido → Adic
    - **In village / Incoming / Goal / Still missing after plan**, one number per resource.
    - A list of proposed sends, closest source first. Press **Enter** repeatedly: each press sends one row, and focus moves to the next.
    - A **Skipped source** table explaining why a source couldn't help, showing the resources, warehouse and merchants the script read for it.
+   - **Exact amounts** (since `v1.1.0`): three fields (wood / clay / iron) to use a fixed goal instead of the fill %. Type what the village must have in total, for example a noble's cost of 40.000 / 50.000 / 50.000, and click **Use amounts** or press Enter. The village's resources and incoming transports are subtracted, and only the rest is requested. An empty field means that resource isn't needed. **Use %** goes back to the fill % from Settings. Amounts bigger than the warehouse are capped to the warehouse size, with a warning. The amounts aren't saved, so each run starts in % mode.
 4. Go to the next village with the game's own arrows or links, then click the quickbar entry again. Tip: give it a keyboard shortcut with **Atribuir** in the quickbar settings.
 
 Running it again on the same village is safe. Transports already on the way are counted as Incoming, so nothing is sent twice.
@@ -111,8 +112,9 @@ URLs are built with `game_data.link_base_pure`, so they also work when sitting a
 ### Planning (`buildPlan()`)
 
 ```
-goal     = floor(storage × fill%)
-need[r]  = max(0, goal − inVillage[r] − incoming[r])        for wood/stone/iron
+goal[r]  = exact amount typed in the panel, capped at storage   (if any field was filled)
+         = floor(storage × fill%)                              (otherwise)
+need[r]  = max(0, goal[r] − inVillage[r] − incoming[r])        for wood/stone/iron
 
 for each ticked source, sorted by distance (closest first):
     stop if total need < minSend
@@ -158,6 +160,7 @@ The panel only works on the village you are on. You move to the next village wit
 | `renderPanel`, `skippedTable`, `summaryRow`, `focusNext` | main panel |
 | `sendRow` | one market send |
 | `showSettings`, `numberInput`, `clamp` | settings dialog |
+| `goalFor`, `useAmounts` | goal per resource (exact amounts or fill %); reads the three amount fields |
 | `incomingFor`, `missingTotal` | incoming transports per village; total still needed to reach the goal |
 | `start` | fetch both overviews in parallel, refresh the current village from them, then render (opens Settings if there are no sources) |
 
@@ -187,6 +190,8 @@ Each version is tagged. A tagged jsDelivr URL (`@vX.Y.Z`) is served immediately 
 |---|---|---|
 | `v1.0.0` | `635d111` | First version given to reviewers (tested in-game on pt117). The reviewers got the `@main` link, which may still have served the older `b951fdd` copy, with a Next village button, because of jsDelivr's cache. |
 | `v1.0.1` | see tag | **Double-send fix.** Before, if the game took longer than 250 ms to confirm a send, pressing Enter again re-sent the same row. In a mock test with a 1.5 s delay, 5 Enter presses produced 5 transports. Now a row is `pending` from the click until the game answers, and can't be sent again. If the game rejects the send, the row is re-enabled so you can retry. |
+
+| `v1.1.0` | see tag | **Exact amounts**: three fields in the panel to fill up to fixed amounts (e.g. a building's or noble's cost) instead of the fill %. |
 
 **Source villages as targets are allowed on purpose.** If you run the panel on one of your source villages, it can plan to fill it from the other sources. The user decided this is a feature, for when a source village needs resources for a special reason.
 
