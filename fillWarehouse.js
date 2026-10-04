@@ -1,9 +1,10 @@
 /*
- * Fill Warehouse
+ * Fill Warehouse v1.1.1
  *
  * Run it while viewing an underdeveloped village. It pulls resources from your
  * configured source villages (closest first) until this village's warehouse
- * reaches the configured fill percentage, counting resources already on the way.
+ * reaches the configured fill percentage, or exact amounts typed in the panel
+ * (e.g. a building's cost), counting resources already in the village and on the way.
  *
  * Every market send is its own button click (one click = one action).
  * Settings are stored per world in localStorage.

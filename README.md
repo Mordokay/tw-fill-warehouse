@@ -193,6 +193,8 @@ Each version is tagged. A tagged jsDelivr URL (`@vX.Y.Z`) is served immediately 
 
 | `v1.1.0` | see tag | **Exact amounts**: three fields in the panel to fill up to fixed amounts (e.g. a building's or noble's cost) instead of the fill %. |
 
+| `v1.1.1` | see tag | Comments only: the header comment now mentions exact amounts and the version number. This is the version for the Script Library update. |
+
 **Source villages as targets are allowed on purpose.** If you run the panel on one of your source villages, it can plan to fill it from the other sources. The user decided this is a feature, for when a source village needs resources for a special reason.
 
 ## Verified in-game (2026-09-26, pt117, desktop)
