@@ -1,5 +1,5 @@
 /*
- * Fill Warehouse v1.2.0
+ * Fill Warehouse v1.2.1
  *
  * Run it while viewing an underdeveloped village. It pulls resources from your
  * configured source villages (closest first) until this village's warehouse
@@ -221,7 +221,10 @@
                 send[r] = Math.min(need[r], Math.max(0, src[r] - keep));
                 if (send[r] < need[r]) keptBack.push(resIcon(r));
             });
-            if (keptBack.length) limits.push(settings.keepPercent + '% keep (' + fmt(keep) + ') of ' + keptBack.join(' '));
+            if (keptBack.length) {
+                limits.push('not enough ' + keptBack.join(' ') + ' in source'
+                    + (keep ? ' (keeping ' + settings.keepPercent + '% = ' + fmt(keep) + ')' : ''));
+            }
 
             if (!src.merchants) {
                 skipped.push({ src: src, reason: 'no free merchants' });

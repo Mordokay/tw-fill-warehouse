@@ -75,7 +75,7 @@ In the game, go to **Configurações → Editar barra de acesso rápido → Adic
 3. The panel shows:
    - **In village / Incoming / Goal / Still missing after plan**, one number per resource.
    - A list of proposed sends, closest source first. Press **Enter** repeatedly: each press sends one row, and focus moves to the next.
-   - **Limited by** (since `v1.2.0`): when a row sends less than the village is missing, this column says why. Either the source's **free merchants** were too few (`free merchants: 80 of the 110 needed`), or its **keep %** held some resources back. When merchants are the limit, send what is shown and press **Recalculate** once they're back. A source with plenty of resources can still be merchant-limited: a noble's 40k/50k/50k needs 140 merchants.
+   - **Limited by** (since `v1.2.0`): when a row sends less than the village is missing, this column says why. Either the source's **free merchants** were too few (`free merchants: 80 of the 110 needed`), or the source didn't have enough of a resource (`not enough [wood] in source`, plus `(keeping X% = N)` when a keep % is set). When merchants are the limit, send what is shown and press **Recalculate** once they're back. A source with plenty of resources can still be merchant-limited: a noble's 40k/50k/50k needs 140 merchants.
    - A **Skipped source** table explaining why a source couldn't help, showing the resources, warehouse and merchants the script read for it.
    - **Exact amounts** (since `v1.1.0`): three fields (wood / clay / iron) to use a fixed goal instead of the fill %. Type what the village must have in total, for example a noble's cost of 40.000 / 50.000 / 50.000, and click **Use amounts** or press Enter. The village's resources and incoming transports are subtracted, and only the rest is requested. An empty field means that resource isn't needed. **Use %** goes back to the fill % from Settings. Amounts bigger than the warehouse are capped to the warehouse size, with a warning. The amounts aren't saved, so each run starts in % mode.
    - **Sources dropdown** (since `v1.2.0`, shown once a template exists): switches the source villages to a saved template, for example one cluster of villages for each side of the map. The plan is recalculated at once, and the choice is saved.
@@ -202,6 +202,8 @@ Each version is tagged. A tagged jsDelivr URL (`@vX.Y.Z`) is served immediately 
 | `v1.1.1` | see tag | Comments only: the header comment now mentions exact amounts and the version number. This is the version for the Script Library update (revision #2081, approved 15.10). |
 
 | `v1.2.0` | see tag | **Limited by** column: says when a row was cut down by free merchants or the keep %. The user reported that a single source with plenty of resources sent only part of the goal, and Recalculate later offered more. The planning had no bug: it was capped by free merchants without saying so. **Source templates**: save sets of source villages and switch between them from the panel. Not yet submitted to the Script Library. |
+
+| `v1.2.1` | see tag | Clearer "Limited by" text for sources that run short: `not enough [wood] [clay] in source (keeping 20% = 80.000)`, without the keep part when keep is 0%. It used to say `0% keep (0) of …`, which was confusing. |
 
 **Source villages as targets are allowed on purpose.** If you run the panel on one of your source villages, it can plan to fill it from the other sources. The user decided this is a feature, for when a source village needs resources for a special reason.
 
