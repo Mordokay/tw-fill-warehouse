@@ -1,5 +1,5 @@
 /*
- * Fill Warehouse v1.1.1
+ * Fill Warehouse v1.2.0
  *
  * Run it while viewing an underdeveloped village. It pulls resources from your
  * configured source villages (closest first) until this village's warehouse
@@ -7,7 +7,7 @@
  * (e.g. a building's cost), counting resources already in the village and on the way.
  *
  * Every market send is its own button click (one click = one action).
- * Settings are stored per world in localStorage.
+ * Settings (including saved source-village templates) are stored per world in localStorage.
  */
 (function () {
     'use strict';
@@ -24,7 +24,8 @@
         fillPercent: 85,    // fill the target warehouse up to this % per resource
         keepPercent: 20,    // never drain a source below this % of its own warehouse
         carry: 1000,        // resources per merchant
-        minSend: 1000       // skip sends smaller than this (total resources)
+        minSend: 1000,      // skip sends smaller than this (total resources)
+        templates: []       // saved source selections: [{ name, sources: [village ids] }]
     };
 
     var target = {
@@ -50,10 +51,17 @@
     function loadSettings() {
         try {
             var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-            return $.extend({}, DEFAULTS, saved);
+            return withOwnLists($.extend({}, DEFAULTS, saved));
         } catch (e) {
-            return $.extend({}, DEFAULTS);
+            return withOwnLists($.extend({}, DEFAULTS));
         }
+    }
+
+    // Copies the arrays so changing them never touches DEFAULTS.
+    function withOwnLists(s) {
+        s.sources = s.sources.slice();
+        s.templates = s.templates.slice();
+        return s;
     }
 
     function saveSettings() {
@@ -92,6 +100,18 @@
 
     function resIcon(r) {
         return '<span class="icon header ' + r + '"></span>';
+    }
+
+    function sameIds(a, b) {
+        return a.length === b.length && a.every(function (id) { return b.indexOf(id) >= 0; });
+    }
+
+    // Index of the saved template whose villages are exactly the current sources, or -1.
+    function activeTemplate() {
+        for (var i = 0; i < settings.templates.length; i++) {
+            if (sameIds(settings.templates[i].sources, settings.sources)) return i;
+        }
+        return -1;
     }
 
     // ---------- data ----------
@@ -195,9 +215,13 @@
             if (sum(need) < settings.minSend) return;
             var keep = Math.floor(src.storage * settings.keepPercent / 100);
             var send = {};
+            var limits = [];
+            var keptBack = [];
             RES.forEach(function (r) {
                 send[r] = Math.min(need[r], Math.max(0, src[r] - keep));
+                if (send[r] < need[r]) keptBack.push(resIcon(r));
             });
+            if (keptBack.length) limits.push(settings.keepPercent + '% keep (' + fmt(keep) + ') of ' + keptBack.join(' '));
 
             if (!src.merchants) {
                 skipped.push({ src: src, reason: 'no free merchants' });
@@ -212,6 +236,7 @@
             var capacity = src.merchants * settings.carry;
             var total = sum(send);
             if (total > capacity) {
+                limits.push('free merchants: ' + src.merchants + ' of the ' + Math.ceil(total / settings.carry) + ' needed');
                 var factor = capacity / total;
                 RES.forEach(function (r) { send[r] = Math.floor(send[r] * factor); });
                 total = sum(send);
@@ -227,6 +252,7 @@
                 send: send,
                 merchants: Math.ceil(total / settings.carry),
                 distance: distance(src),
+                limit: limits.join('; '),
                 targetId: target.id,
                 sent: false
             });
@@ -300,24 +326,31 @@
                 html += '<p><b>Nothing to send.</b> None of your source villages can help right now:</p>';
             }
         } else {
+            var anyLimit = plan.rows.some(function (row) { return row.limit; });
             html += '<table class="vis fillWH-table" width="100%"><tr><th>Source</th><th>Distance</th>'
                 + RES.map(function (r) { return '<th>' + resIcon(r) + '</th>'; }).join('')
-                + '<th>Merchants</th><th></th></tr>';
+                + '<th>Merchants</th>' + (anyLimit ? '<th>Limited by</th>' : '') + '<th></th></tr>';
             plan.rows.forEach(function (row, i) {
                 html += '<tr id="fillWH_row' + i + '">'
                     + '<td>' + esc(row.src.name) + '</td>'
                     + '<td>' + row.distance.toFixed(1) + '</td>'
                     + RES.map(function (r) { return '<td>' + fmt(row.send[r]) + '</td>'; }).join('')
                     + '<td>' + row.merchants + ' / ' + row.src.merchants + '</td>'
+                    + (anyLimit ? '<td style="text-align:left;">' + (row.limit || '') + '</td>' : '')
                     + '<td><input type="button" class="btn fillWH-send" data-row="' + i + '" value="Send"></td>'
                     + '</tr>';
             });
             html += '</table>';
+            if (plan.rows.some(function (row) { return row.limit.indexOf('merchants') >= 0; })) {
+                html += '<p style="margin:4px 0;">Not enough free merchants to send everything at once. '
+                    + 'Send this now and press Recalculate when the merchants are back for the rest.</p>';
+            }
         }
 
         html += skippedTable();
 
         html += '<div style="margin-top:6px;">'
+            + templateSwitcher()
             + '<input type="button" class="btn" id="fillWH_settings" value="Settings"> '
             + '<input type="button" class="btn" id="fillWH_refresh" value="Recalculate"> '
             + '<input type="button" class="btn" id="fillWH_close" value="Close">'
@@ -338,6 +371,13 @@
             }
         });
         $('#fillWH_close').on('click', function () { $('#fillWH').remove(); });
+        $('#fillWH').on('change', '#fillWH_template', function () {
+            var tpl = settings.templates[parseInt(this.value, 10)];
+            if (!tpl) return;
+            settings.sources = tpl.sources.slice();
+            saveSettings();
+            renderPanel();
+        });
         focusNext();
     }
 
@@ -352,6 +392,19 @@
         });
         customGoal = any ? amounts : null;
         start();
+    }
+
+    // Dropdown on the panel to switch the source villages to a saved template.
+    function templateSwitcher() {
+        if (!settings.templates.length) return '<span id="fillWH_tplWrap"></span>';
+        var active = activeTemplate();
+        var html = '<span id="fillWH_tplWrap">Sources: <select id="fillWH_template">';
+        if (active < 0) html += '<option value="-1" selected>Unsaved selection (' + settings.sources.length + ')</option>';
+        settings.templates.forEach(function (tpl, i) {
+            html += '<option value="' + i + '"' + (i === active ? ' selected' : '') + '>'
+                + esc(tpl.name) + ' (' + tpl.sources.length + ')</option>';
+        });
+        return html + '</select> </span>';
     }
 
     // Sources that were considered but couldn't send, with what the script read for them.
@@ -439,6 +492,11 @@
             + numberInput('fillWH_min', 'Skip sends smaller than', settings.minSend)
             + '</table>'
             + '<h4 style="margin-top:10px;">Source villages (' + '<span id="fillWH_count"></span> selected)</h4>'
+            + '<div style="margin-bottom:6px;">Templates: <select id="fillWH_tplSelect"></select> '
+            + '<input type="button" class="btn" id="fillWH_tplLoad" value="Load"> '
+            + '<input type="button" class="btn" id="fillWH_tplDelete" value="Delete"> &nbsp; '
+            + '<input type="text" id="fillWH_tplName" placeholder="Template name" style="width:130px;"> '
+            + '<input type="button" class="btn" id="fillWH_tplSave" value="Save ticked as template"></div>'
             + '<input type="text" id="fillWH_filter" placeholder="Filter by name or coords" style="width:200px;"> '
             + '<input type="button" class="btn" id="fillWH_all" value="Select shown"> '
             + '<input type="button" class="btn" id="fillWH_none" value="Clear shown">'
@@ -472,6 +530,45 @@
         });
         $('#fillWH_all').on('click', function () { $('.fillWH-vrow:visible .fillWH-src').prop('checked', true); updateCount(); });
         $('#fillWH_none').on('click', function () { $('.fillWH-vrow:visible .fillWH-src').prop('checked', false); updateCount(); });
+
+        var fillTemplates = function (selected) {
+            $('#fillWH_tplSelect').html(settings.templates.length
+                ? settings.templates.map(function (tpl, i) {
+                    return '<option value="' + i + '"' + (i === selected ? ' selected' : '') + '>'
+                        + esc(tpl.name) + ' (' + tpl.sources.length + ')</option>';
+                }).join('')
+                : '<option value="-1">(none saved yet)</option>');
+        };
+        fillTemplates(activeTemplate());
+        $('#fillWH_tplLoad').on('click', function () {
+            var tpl = settings.templates[parseInt($('#fillWH_tplSelect').val(), 10)];
+            if (!tpl) return;
+            $('.fillWH-src').each(function () { this.checked = tpl.sources.indexOf(parseInt(this.value, 10)) >= 0; });
+            $('#fillWH_tplName').val(tpl.name);
+            updateCount();
+        });
+        $('#fillWH_tplDelete').on('click', function () {
+            var i = parseInt($('#fillWH_tplSelect').val(), 10);
+            if (!settings.templates[i]) return;
+            settings.templates.splice(i, 1);
+            saveSettings();
+            fillTemplates(-1);
+            $('#fillWH_tplWrap').replaceWith(templateSwitcher());
+        });
+        // Templates are saved right away; the ticked villages and numbers above only on Save.
+        $('#fillWH_tplSave').on('click', function () {
+            var name = $('#fillWH_tplName').val().trim();
+            var ids = $('.fillWH-src:checked').map(function () { return parseInt(this.value, 10); }).get();
+            if (!name) return UI.ErrorMessage('Type a name for the template.');
+            if (!ids.length) return UI.ErrorMessage('Tick at least one village first.');
+            var i = settings.templates.findIndex(function (tpl) { return tpl.name === name; });
+            if (i < 0) i = settings.templates.push({ name: name, sources: ids }) - 1;
+            else settings.templates[i].sources = ids;
+            saveSettings();
+            fillTemplates(i);
+            $('#fillWH_tplWrap').replaceWith(templateSwitcher());
+            UI.SuccessMessage('Template "' + name + '" saved.');
+        });
         $('#fillWH_save').on('click', function () {
             settings.fillPercent = clamp($('#fillWH_fill').val(), 1, 100, DEFAULTS.fillPercent);
             settings.keepPercent = clamp($('#fillWH_keep').val(), 0, 100, DEFAULTS.keepPercent);

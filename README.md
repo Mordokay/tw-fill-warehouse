@@ -75,8 +75,10 @@ In the game, go to **Configurações → Editar barra de acesso rápido → Adic
 3. The panel shows:
    - **In village / Incoming / Goal / Still missing after plan**, one number per resource.
    - A list of proposed sends, closest source first. Press **Enter** repeatedly: each press sends one row, and focus moves to the next.
+   - **Limited by** (since `v1.2.0`): when a row sends less than the village is missing, this column says why. Either the source's **free merchants** were too few (`free merchants: 80 of the 110 needed`), or its **keep %** held some resources back. When merchants are the limit, send what is shown and press **Recalculate** once they're back. A source with plenty of resources can still be merchant-limited: a noble's 40k/50k/50k needs 140 merchants.
    - A **Skipped source** table explaining why a source couldn't help, showing the resources, warehouse and merchants the script read for it.
    - **Exact amounts** (since `v1.1.0`): three fields (wood / clay / iron) to use a fixed goal instead of the fill %. Type what the village must have in total, for example a noble's cost of 40.000 / 50.000 / 50.000, and click **Use amounts** or press Enter. The village's resources and incoming transports are subtracted, and only the rest is requested. An empty field means that resource isn't needed. **Use %** goes back to the fill % from Settings. Amounts bigger than the warehouse are capped to the warehouse size, with a warning. The amounts aren't saved, so each run starts in % mode.
+   - **Sources dropdown** (since `v1.2.0`, shown once a template exists): switches the source villages to a saved template, for example one cluster of villages for each side of the map. The plan is recalculated at once, and the choice is saved.
 4. Go to the next village with the game's own arrows or links, then click the quickbar entry again. Tip: give it a keyboard shortcut with **Atribuir** in the quickbar settings.
 
 Running it again on the same village is safe. Transports already on the way are counted as Incoming, so nothing is sent twice.
@@ -92,6 +94,7 @@ Settings are stored in `localStorage` under `fillWH_<world>_<playerId>`, so each
 | Resources per merchant | 1000 | Merchant carrying capacity |
 | Skip sends smaller than | 1000 | Don't propose a send whose total is below this. Also stops planning once the remaining need falls below it. |
 | Source villages | none | Ticked villages, stored as village IDs. The current village is never used as a source, even if ticked. |
+| Templates | none | Saved sets of ticked villages (`templates: [{name, sources}]`). In Settings: tick villages, type a name and click **Save ticked as template** (the same name overwrites it). **Load** ticks a template's villages (then **Save** to use them), **Delete** removes it. Templates are stored as soon as they're saved or deleted. |
 
 ---
 
@@ -123,6 +126,7 @@ for each ticked source, sorted by distance (closest first):
     skip if 0 free merchants              → "no free merchants"
     skip if nothing to send               → "nothing above X% keep"
     if sum(send) > merchants × carry: scale all three down proportionally
+    (each limit that applied is shown in the row's "Limited by" column)
     skip if sum(send) < minSend           → "could only send N (below minimum)"
     need[r] −= send[r]; add row
 ```
@@ -145,7 +149,8 @@ The panel only works on the village you are on. You move to the next village wit
 ### UI
 
 - `renderPanel()` prepends `#fillWH` to `#contentContainer`.
-- `showSettings()` opens a `Dialog` with number inputs, a filterable village list with checkboxes, and "Select shown" / "Clear shown" buttons.
+- `showSettings()` opens a `Dialog` with number inputs, the templates row (select, Load, Delete, name, Save ticked as template), a filterable village list with checkboxes, and "Select shown" / "Clear shown" buttons.
+- `templateSwitcher()` draws the panel's Sources dropdown inside `#fillWH_tplWrap`. That span is replaced after a template is saved or deleted, without a full re-render, so focus never jumps to a Send button while the dialog is open.
 - `injectStyles()` adds `.fillWH-table` padding (3px 14px) and right-aligns the number cells.
 - Village names already contain `(x|y) Kxx`, so coordinates are not appended again.
 
@@ -153,10 +158,11 @@ The panel only works on the village you are on. You move to the next village wit
 
 | Function | Purpose |
 |---|---|
-| `loadSettings` / `saveSettings` | localStorage, merged with `DEFAULTS` |
+| `loadSettings` / `saveSettings`, `withOwnLists` | localStorage, merged with `DEFAULTS` (arrays copied) |
+| `sameIds`, `activeTemplate`, `templateSwitcher` | source-village templates |
 | `url`, `parseNumber`, `fmt`, `esc`, `distance`, `sum`, `resIcon` | helpers (`fmt` uses `.` as thousands separator, as the PT game does) |
 | `fetchVillages`, `fetchIncoming` | scrape the overviews |
-| `buildPlan` | the algorithm above; returns `{goal, remaining, rows, skipped, missing, sourceCount}` |
+| `buildPlan` | the algorithm above; returns `{goal, remaining, rows, skipped, missing, sourceCount}`; each row has a `limit` text |
 | `renderPanel`, `skippedTable`, `summaryRow`, `focusNext` | main panel |
 | `sendRow` | one market send |
 | `showSettings`, `numberInput`, `clamp` | settings dialog |
@@ -193,7 +199,9 @@ Each version is tagged. A tagged jsDelivr URL (`@vX.Y.Z`) is served immediately 
 
 | `v1.1.0` | see tag | **Exact amounts**: three fields in the panel to fill up to fixed amounts (e.g. a building's or noble's cost) instead of the fill %. |
 
-| `v1.1.1` | see tag | Comments only: the header comment now mentions exact amounts and the version number. This is the version for the Script Library update. |
+| `v1.1.1` | see tag | Comments only: the header comment now mentions exact amounts and the version number. This is the version for the Script Library update (revision #2081, approved 15.10). |
+
+| `v1.2.0` | see tag | **Limited by** column: says when a row was cut down by free merchants or the keep %. The user reported that a single source with plenty of resources sent only part of the goal, and Recalculate later offered more. The planning had no bug: it was capped by free merchants without saying so. **Source templates**: save sets of source villages and switch between them from the panel. Not yet submitted to the Script Library. |
 
 **Source villages as targets are allowed on purpose.** If you run the panel on one of your source villages, it can plan to fill it from the other sources. The user decided this is a feature, for when a source village needs resources for a special reason.
 
@@ -228,4 +236,4 @@ Each version is tagged. A tagged jsDelivr URL (`@vX.Y.Z`) is served immediately 
 - Merchant capacity is a setting, not read from the game.
 - **Testing rule:** never automate a browser against the real game or with a logged-in profile (the user was banned once). Mock tests only: a local server on 127.0.0.1 plus a throwaway headless-Chrome profile. The mock server and test scripts were temporary and weren't kept.
 - The script doesn't estimate how long each transport will take to arrive; it only shows distance.
-- Possible future ideas: a stored list of target villages with a "next target" button; picking sources by group instead of checkboxes; preparing the Script Library submission (it needs an in-game config UI, which this already has).
+- Possible future ideas: pick the template whose villages are closest to the current village automatically; a stored list of target villages with a "next target" button; picking sources by group instead of checkboxes; preparing the Script Library submission (it needs an in-game config UI, which this already has).
