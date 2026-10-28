@@ -225,7 +225,7 @@ Each version is tagged. A tagged jsDelivr URL (`@vX.Y.Z`) is served immediately 
 
 | `v1.2.1` | see tag | Clearer "Limited by" text for sources that run short: `not enough [wood] [clay] in source (keeping 20% = 80.000)`, without the keep part when keep is 0%. It used to say `0% keep (0) of …`, which was confusing. |
 
-| `v1.3.0` | see tag | **Fill another player's village.** Run it on a village's info page: the target becomes that village, you type the amounts to send, your transports already on the way are subtracted, and the warehouse level comes from the tribe's Buildings page when shared (cap + "Fill to X%" button). On one of your own villages' info pages, the normal mode targets that village. Tested in a mock built from the user's saved pages; not yet tested in-game. |
+| `v1.3.0` | see tag | **Fill another player's village.** Run it on a village's info page: the target becomes that village, you type the amounts to send, your transports already on the way are subtracted, and the warehouse level comes from the tribe's Buildings page when shared (cap + "Fill to X%" button). On one of your own villages' info pages, the normal mode targets that village. Tested in a mock built from the user's saved pages, then in-game on 2026-10-28: 100.000 of each resource planned from 5 sources to a tribe member's village (warehouse level 28 read correctly), and the sends arrived with the planned amounts. |
 
 **Source villages as targets are allowed on purpose.** If you run the panel on one of your source villages, it can plan to fill it from the other sources. The user decided this is a feature, for when a source village needs resources for a special reason.
 
