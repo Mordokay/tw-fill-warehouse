@@ -1,10 +1,13 @@
 /*
- * Fill Warehouse v1.2.1
+ * Fill Warehouse v1.3.0
  *
  * Run it while viewing an underdeveloped village. It pulls resources from your
  * configured source villages (closest first) until this village's warehouse
  * reaches the configured fill percentage, or exact amounts typed in the panel
  * (e.g. a building's cost), counting resources already in the village and on the way.
+ *
+ * Run it on another player's village page (e.g. a tribe member's) to send him exact
+ * amounts. His warehouse size is read from the tribe's Buildings page when he shares it.
  *
  * Every market send is its own button click (one click = one action).
  * Settings (including saved source-village templates) are stored per world in localStorage.
@@ -18,6 +21,10 @@
     }
 
     var RES = ['wood', 'stone', 'iron'];
+    // Warehouse capacity per level (index = level - 1).
+    var STORAGE_CAPACITY = [1000, 1229, 1512, 1859, 2285, 2810, 3454, 4247, 5222, 6420, 7893, 9705, 11932, 14670,
+        18037, 22177, 27266, 33523, 41217, 50675, 62305, 76604, 94184, 115798, 142373, 175047, 215219, 264611,
+        325337, 400000];
     var STORAGE_KEY = 'fillWH_' + game_data.world + '_' + game_data.player.id;
     var DEFAULTS = {
         sources: [],        // village ids allowed to send resources
@@ -38,6 +45,14 @@
         stone: Math.floor(game_data.village.stone),
         iron: Math.floor(game_data.village.iron)
     };
+
+    // On another player's village page the target is that village (see readVillagePage).
+    var page = readVillagePage();
+    if (page) {
+        target = { id: page.id, name: page.name, x: page.x, y: page.y, storage: 0, wood: 0, stone: 0, iron: 0 };
+    }
+    var foreign = page && page.ownerId !== parseInt(game_data.player.id, 10) ? page : null;
+    var storageLevel = null;   // foreign target's warehouse level, when the tribe page shows it
 
     var settings = loadSettings();
     var villages = [];
@@ -114,6 +129,28 @@
         return -1;
     }
 
+    // The village on the info_village screen ({id, name, x, y, ownerId, ownerName}), or null.
+    function readVillagePage() {
+        var id = (location.search.match(/[?&]id=(\d+)/) || [])[1];
+        if (game_data.screen !== 'info_village' || !id) return null;
+        var $content = $('#content_value');
+        var coords = null;
+        $content.find('table.vis td').each(function () {
+            coords = coords || $(this).text().match(/^\s*(\d+)\|(\d+)/);
+        });
+        var $owner = $content.find('a[href*="screen=info_player"]').first();
+        var ownerId = ($owner.attr('href') || '').match(/[?&]id=(\d+)/);
+        if (!coords || !ownerId) return null;
+        return {
+            id: parseInt(id, 10),
+            name: $content.find('h2').first().text().trim() + ' (' + coords[1] + '|' + coords[2] + ')',
+            x: parseInt(coords[1], 10),
+            y: parseInt(coords[2], 10),
+            ownerId: parseInt(ownerId[1], 10),
+            ownerName: $owner.text().trim()
+        };
+    }
+
     // ---------- data ----------
 
     function fetchVillages() {
@@ -147,18 +184,19 @@
         });
     }
 
-    // Resources already travelling to each of your villages (from anyone), keyed by village id.
-    function fetchIncoming() {
-        return $.get(url('overview_villages&mode=trader&type=inc&group=0&page=-1')).then(function (html) {
+    // Resources travelling to each village, keyed by village id. type 'inc' = to your villages
+    // (from anyone, resources in column 8); 'out' = sent by you (to anyone, column 9).
+    function fetchTransports(type, resColumn) {
+        return $.get(url('overview_villages&mode=trader&type=' + type + '&group=0&page=-1')).then(function (html) {
             var byVillage = {};
             $(html).find('#trades_table tr').each(function () {
                 var cells = this.children;
-                if (cells.length < 9 || cells[0].tagName === 'TH') return;
+                if (cells.length <= resColumn || cells[0].tagName === 'TH') return;
                 var href = $(cells[4]).find('a').attr('href') || '';
                 var m = href.match(/[?&]id=(\d+)/) || href.match(/village=(\d+)/);
                 if (!m) return;
                 var total = incomingFor(byVillage, parseInt(m[1], 10));
-                $(cells[8]).children().each(function () {
+                $(cells[resColumn]).children().each(function () {
                     var classes = this.className + ' ' + $(this).find('[class]').map(function () {
                         return this.className;
                     }).get().join(' ');
@@ -170,29 +208,51 @@
         });
     }
 
+    // Warehouse level of the owner's village from the tribe's Buildings page, or null when
+    // it isn't shown (not in your tribe, buildings not shared, or the page couldn't be read).
+    function fetchStorageLevel(ownerId, villageId) {
+        var result = $.Deferred();
+        $.get(url('ally&mode=members_buildings&player_id=' + ownerId)).done(function (html) {
+            var level = null;
+            $(html).find('table').each(function () {
+                var column = $(this).find('tr').first().children().index($(this).find('th img[src*="storage"]').closest('th'));
+                if (column < 0) return;
+                $(this).find('tr').each(function () {
+                    var href = $(this.children[0]).find('a').attr('href') || '';
+                    if (new RegExp('[?&]id=' + villageId + '(\\D|$)').test(href)) {
+                        level = parseInt($(this.children[column]).text(), 10) || null;
+                    }
+                });
+            });
+            result.resolve(level);
+        }).fail(function () {
+            result.resolve(null);
+        });
+        return result.promise();
+    }
+
     function incomingFor(byVillage, id) {
         if (!byVillage[id]) byVillage[id] = { wood: 0, stone: 0, iron: 0 };
         return byVillage[id];
     }
 
     // Goal per resource: the exact amounts typed in the panel (never more than the warehouse
-    // holds), or the fill % from Settings.
+    // holds, when known), or the fill % from Settings. Another player's village has no % goal,
+    // because his resources can't be seen.
     function goalFor(v) {
         var goal = {};
         RES.forEach(function (r) {
-            goal[r] = customGoal
-                ? Math.min(customGoal[r], v.storage)
-                : Math.floor(v.storage * settings.fillPercent / 100);
+            if (customGoal) goal[r] = v.storage ? Math.min(customGoal[r], v.storage) : customGoal[r];
+            else goal[r] = foreign ? 0 : Math.floor(v.storage * settings.fillPercent / 100);
         });
         return goal;
     }
 
-    // Total still needed to reach the goal, counting what's already on the way.
-    function missingTotal(v) {
-        var goal = goalFor(v);
-        var inc = incomingFor(incomingByVillage, v.id);
+    // Total the target still needs to reach the goal, counting what's already on the way.
+    function missingTotal() {
+        var goal = goalFor(target);
         return RES.reduce(function (total, r) {
-            return total + Math.max(0, goal[r] - v[r] - inc[r]);
+            return total + Math.max(0, goal[r] - target[r] - incoming[r]);
         }, 0);
     }
 
@@ -297,11 +357,15 @@
             + '<table class="vis fillWH-table" style="margin-bottom:6px;"><tr><th></th>'
             + RES.map(function (r) { return '<th>' + resIcon(r) + '</th>'; }).join('')
             + '</tr>'
-            + summaryRow('In village', target)
-            + summaryRow('Incoming', incoming)
-            + summaryRow(customGoal ? 'Goal (exact amounts)' : 'Goal (' + settings.fillPercent + '% of ' + fmt(target.storage) + ')', plan.goal)
+            + (foreign
+                ? '<tr><td>In village</td>' + RES.map(function () { return '<td>?</td>'; }).join('') + '</tr>'
+                    + summaryRow('Your transports on the way', incoming)
+                : summaryRow('In village', target) + summaryRow('Incoming', incoming))
+            + summaryRow(customGoal ? 'Goal (exact amounts)'
+                : foreign ? 'Goal (no amounts yet)'
+                : 'Goal (' + settings.fillPercent + '% of ' + fmt(target.storage) + ')', plan.goal)
             + summaryRow('Still missing after plan', plan.remaining)
-            + '<tr><td>Exact amounts</td>'
+            + '<tr><td>' + (foreign ? 'Amounts to send' : 'Exact amounts') + '</td>'
             + RES.map(function (r) {
                 return '<td><input type="text" class="fillWH-amount" data-res="' + r + '" size="7" style="text-align:right;"'
                     + ' value="' + (customGoal ? fmt(customGoal[r]) : '') + '"></td>';
@@ -309,11 +373,21 @@
             + '</tr></table>'
             + '<div style="margin-bottom:6px;">'
             + '<input type="button" class="btn" id="fillWH_useAmounts" value="Use amounts"> '
-            + (customGoal ? '<input type="button" class="btn" id="fillWH_usePercent" value="Use % (' + settings.fillPercent + '%)">' : '')
-            + ' <span style="font-size:0.9em;">Type the total you need in the village (e.g. a building\'s cost); what it has and what is on the way is subtracted.</span>'
-            + '</div>';
+            + (foreign && target.storage ? '<input type="button" class="btn" id="fillWH_fillPercent" value="Fill to ' + settings.fillPercent + '%">' : '')
+            + (!foreign && customGoal ? '<input type="button" class="btn" id="fillWH_usePercent" value="Use % (' + settings.fillPercent + '%)">' : '')
+            + ' <span style="font-size:0.9em;">' + (foreign
+                ? 'His resources can\'t be seen: type the total to send; your transports already on the way to him are subtracted.'
+                : 'Type the total you need in the village (e.g. a building\'s cost); what it has and what is on the way is subtracted.')
+            + '</span></div>';
 
-        if (customGoal && RES.some(function (r) { return customGoal[r] > target.storage; })) {
+        if (foreign) {
+            html += '<p style="margin:4px 0;">Owner: <b>' + esc(foreign.ownerName) + '</b>. ' + (target.storage
+                ? 'Warehouse level ' + storageLevel + ' (' + fmt(target.storage) + '), from the tribe\'s Buildings page.'
+                : 'Warehouse size unknown (not shown on your tribe\'s Buildings page), so amounts aren\'t capped.')
+                + '</p>';
+        }
+
+        if (customGoal && target.storage && RES.some(function (r) { return customGoal[r] > target.storage; })) {
             html += '<p><b>Warning:</b> some amounts are bigger than the warehouse (' + fmt(target.storage)
                 + '), so they were capped to the warehouse size.</p>';
         }
@@ -321,7 +395,9 @@
         if (!settings.sources.length) {
             html += '<p><b>No source villages configured.</b> Open Settings to pick them.</p>';
         } else if (!plan.rows.length) {
-            if (missingTotal(target) < settings.minSend) {
+            if (foreign && !customGoal) {
+                html += '<p><b>Type the amounts to send</b>' + (target.storage ? ' or use Fill to ' + settings.fillPercent + '%' : '') + '.</p>';
+            } else if (missingTotal() < settings.minSend) {
                 html += '<p><b>Nothing to send.</b> This village is already at the goal.</p>';
             } else if (!plan.sourceCount) {
                 html += '<p><b>Nothing to send.</b> None of your source villages were found (only this village is selected, or the overview could not be read).</p>';
@@ -367,6 +443,11 @@
         $('#fillWH_refresh').on('click', function () { start(); });
         $('#fillWH_useAmounts').on('click', useAmounts);
         $('#fillWH_usePercent').on('click', function () { customGoal = null; start(); });
+        $('#fillWH_fillPercent').on('click', function () {
+            var amount = Math.floor(target.storage * settings.fillPercent / 100);
+            customGoal = { wood: amount, stone: amount, iron: amount };
+            start();
+        });
         $('#fillWH .fillWH-amount').on('keydown', function (e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -599,12 +680,20 @@
     // Loads fresh data (so earlier sends are counted) and draws the panel.
     function start() {
         $('#fillWH input.btn').prop('disabled', true);
-        $.when(fetchVillages(), fetchIncoming()).done(function (list, inc) {
+        $.when(
+            fetchVillages(),
+            fetchTransports(foreign ? 'out' : 'inc', foreign ? 9 : 8),
+            foreign ? fetchStorageLevel(foreign.ownerId, foreign.id) : null
+        ).done(function (list, inc, level) {
             villages = list;
             incomingByVillage = inc;
 
             var current = villages.find(function (v) { return v.id === target.id; });
             if (current) target = $.extend({}, current);
+            if (foreign) {
+                storageLevel = level;
+                target.storage = level ? STORAGE_CAPACITY[Math.min(level, 30) - 1] : 0;
+            }
 
             incoming = incomingFor(incomingByVillage, target.id);
             renderPanel();

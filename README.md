@@ -81,6 +81,19 @@ In the game, go to **Configurações → Editar barra de acesso rápido → Adic
    - **Sources dropdown** (since `v1.2.0`, shown once a template exists): switches the source villages to a saved template, for example one cluster of villages for each side of the map. The plan is recalculated at once, and the choice is saved.
 4. Go to the next village with the game's own arrows or links, then click the quickbar entry again. Tip: give it a keyboard shortcut with **Atribuir** in the quickbar settings.
 
+### Filling another player's village (since `v1.3.0`)
+
+Open the village's page (click the village on the map or in the tribe's member list, so the URL has `screen=info_village&id=…`) and click the quickbar entry. The panel then targets **that** village:
+
+- **In village** shows `?`, because the game doesn't show other players' resources.
+- **Your transports on the way** counts only *your* transports already heading there (from your outgoing transports overview). Other players' transports can't be seen.
+- Type the totals to send in **Amounts to send** and click **Use amounts**. Your transports already on the way are subtracted.
+- If he shares his buildings with the tribe, the panel reads his **warehouse level** from the tribe's *Membros → Edifícios* page and shows its size. Amounts are then capped at that size, and a **Fill to X%** button fills the three fields with X% of his warehouse (X = your fill % from Settings). Lower them if he already has resources there.
+- If the level can't be read (he isn't in your tribe, or doesn't share buildings), the panel says "Warehouse size unknown" and the amounts aren't capped.
+- Sources work as usual: your ticked villages or template, **closest to his village first**, with keep %, merchant limits and one click per send.
+
+Running the script on the page of one of **your own** villages targets that village in the normal mode, so you can fill a village without switching to it first.
+
 Running it again on the same village is safe. Transports already on the way are counted as Incoming, so nothing is sent twice.
 
 ## Settings
@@ -108,7 +121,13 @@ Everything is in a single file, `fillWarehouse.js`, wrapped in an IIFE. It uses 
 |---|---|---|
 | Current village (id, name, coords, resources, warehouse) | `game_data.village`, then overwritten with fresher numbers from the production overview | `start()` |
 | All own villages: resources, warehouse, free merchants, coords | `overview_villages&mode=prod&group=0&page=-1` → `#production_table` rows. Village from `span.quickedit-vn` (`data-id`, last `x\|y` in its text); resources from `span.res/.warn_90/.warn` `.wood/.stone/.iron`; warehouse = the next `<td>`; merchants = the `<td>` after that (`free/total`) | `fetchVillages()` |
-| Resources travelling to the current village | `overview_villages&mode=trader&type=inc&group=0&page=-1` → `#trades_table` rows. Destination village id is read from the link in `cells[4]`, resources from the children of `cells[8]` (type from class name `wood/stone/iron`) | `fetchIncoming()` |
+| Resources travelling to the current village | `overview_villages&mode=trader&type=inc&group=0&page=-1` → `#trades_table` rows. Destination village id is read from the link in `cells[4]`, resources from the children of `cells[8]` (type from class name `wood/stone/iron`) | `fetchTransports('inc', 8)` |
+
+| Another player's village (since `v1.3.0`) | The `info_village` page itself: id from the URL `id=`, name from `#content_value h2`, coordinates from the first `td` starting with `x\|y`, owner from the `screen=info_player` link | `readVillagePage()` |
+| Your transports on the way to that village | `overview_villages&mode=trader&type=out&group=0&page=-1` → `#trades_table`. Same destination column (`cells[4]`), but resources are in `cells[9]` (this table has an extra checkbox column) | `fetchTransports('out', 9)` |
+| His warehouse level | `ally&mode=members_buildings&player_id=<owner>` → the table whose header has `img[src*="storage"]`; that column in the row whose first link has `id=<village>`. Level → capacity with the game's table (`STORAGE_CAPACITY`, level 1 = 1.000 … 30 = 400.000) | `fetchStorageLevel()` |
+
+These three page layouts were taken from pages the user saved by hand on 2026-10-28 (pt117, desktop).
 
 URLs are built with `game_data.link_base_pure`, so they also work when sitting another account. The column positions come from Shinko to Kuma's Warehouse Balancer and were **verified in-game on pt117 (desktop layout)**.
 
@@ -161,13 +180,14 @@ The panel only works on the village you are on. You move to the next village wit
 | `loadSettings` / `saveSettings`, `withOwnLists` | localStorage, merged with `DEFAULTS` (arrays copied) |
 | `sameIds`, `activeTemplate`, `templateSwitcher` | source-village templates |
 | `url`, `parseNumber`, `fmt`, `esc`, `distance`, `sum`, `resIcon` | helpers (`fmt` uses `.` as thousands separator, as the PT game does) |
-| `fetchVillages`, `fetchIncoming` | scrape the overviews |
+| `fetchVillages`, `fetchTransports` | scrape the overviews (`'inc'` for your villages, `'out'` for another player's village) |
+| `readVillagePage`, `fetchStorageLevel` | another player's village: read the info page; warehouse level from the tribe's Buildings page |
 | `buildPlan` | the algorithm above; returns `{goal, remaining, rows, skipped, missing, sourceCount}`; each row has a `limit` text |
 | `renderPanel`, `skippedTable`, `summaryRow`, `focusNext` | main panel |
 | `sendRow` | one market send |
 | `showSettings`, `numberInput`, `clamp` | settings dialog |
 | `goalFor`, `useAmounts` | goal per resource (exact amounts or fill %); reads the three amount fields |
-| `incomingFor`, `missingTotal` | incoming transports per village; total still needed to reach the goal |
+| `incomingFor`, `missingTotal` | transports on the way per village; total the target still needs to reach the goal |
 | `start` | fetch both overviews in parallel, refresh the current village from them, then render (opens Settings if there are no sources) |
 
 ---
@@ -204,6 +224,8 @@ Each version is tagged. A tagged jsDelivr URL (`@vX.Y.Z`) is served immediately 
 | `v1.2.0` | see tag | **Limited by** column: says when a row was cut down by free merchants or the keep %. The user reported that a single source with plenty of resources sent only part of the goal, and Recalculate later offered more. The planning had no bug: it was capped by free merchants without saying so. **Source templates**: save sets of source villages and switch between them from the panel. Not yet submitted to the Script Library. |
 
 | `v1.2.1` | see tag | Clearer "Limited by" text for sources that run short: `not enough [wood] [clay] in source (keeping 20% = 80.000)`, without the keep part when keep is 0%. It used to say `0% keep (0) of …`, which was confusing. |
+
+| `v1.3.0` | see tag | **Fill another player's village.** Run it on a village's info page: the target becomes that village, you type the amounts to send, your transports already on the way are subtracted, and the warehouse level comes from the tribe's Buildings page when shared (cap + "Fill to X%" button). On one of your own villages' info pages, the normal mode targets that village. Tested in a mock built from the user's saved pages; not yet tested in-game. |
 
 **Source villages as targets are allowed on purpose.** If you run the panel on one of your source villages, it can plan to fill it from the other sources. The user decided this is a feature, for when a source village needs resources for a special reason.
 
